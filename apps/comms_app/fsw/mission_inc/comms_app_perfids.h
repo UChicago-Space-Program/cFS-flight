@@ -18,47 +18,13 @@
 
 /**
  * @file
- *   Define TO Lab Application header file
+ *
+ * Define Comms App Performance IDs
  */
 
-#ifndef TO_LAB_APP_H
-#define TO_LAB_APP_H
+#ifndef COMMS_APP_PERFIDS_H
+#define COMMS_APP_PERFIDS_H
 
-#include "cfe.h"
+#define COMMS_APP_PERF_ID 91
 
-#include <errno.h>
-#include <string.h>
-#include <unistd.h>
-
-#include "common_types.h"
-#include "osapi.h"
-
-/*****************************************************************************/
-
-#define TO_LAB_TASK_MSEC 500 /* run at 2 Hz */
-#define TO_LAB_UNUSED    CFE_SB_MSGID_RESERVED
-
-/**
- * Depth of pipe for commands to the TO_LAB application itself
- */
-#define TO_LAB_CMD_PIPE_DEPTH 8
-
-/**
- * Depth of pipe for telemetry forwarded through the TO_LAB application
- */
-#define TO_LAB_TLM_PIPE_DEPTH OS_QUEUE_MAX_DEPTH
-
-#define cfgTLM_ADDR        "host.docker.internal"
-#define cfgTLM_PORT        1235
-#define TO_LAB_VERSION_NUM "5.1.0"
-
-/******************************************************************************/
-
-/*
-** Prototypes Section
-*/
-void TO_LAB_AppMain(void);
-
-/******************************************************************************/
-
-#endif
+#endif /* COMMS_APP_PERFIDS_H */

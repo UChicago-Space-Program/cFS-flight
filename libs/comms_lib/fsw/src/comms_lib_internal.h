@@ -18,47 +18,32 @@
 
 /**
  * @file
- *   Define TO Lab Application header file
+ *  An example of an internal (private) header file for COMMS Lib
  */
+#ifndef COMMS_LIB_INTERNAL_H
+#define COMMS_LIB_INTERNAL_H
 
-#ifndef TO_LAB_APP_H
-#define TO_LAB_APP_H
+/* Include all external/public definitions */
+#include "comms_lib.h"
 
-#include "cfe.h"
+/*************************************************************************
+** Macro Definitions
+*************************************************************************/
 
-#include <errno.h>
-#include <string.h>
-#include <unistd.h>
+#define COMMS_LIB_BUFFER_SIZE 16
 
-#include "common_types.h"
-#include "osapi.h"
+/*************************************************************************
+** Internal Data Structures
+*************************************************************************/
+extern char COMMS_LIB_Buffer[COMMS_LIB_BUFFER_SIZE];
 
-/*****************************************************************************/
-
-#define TO_LAB_TASK_MSEC 500 /* run at 2 Hz */
-#define TO_LAB_UNUSED    CFE_SB_MSGID_RESERVED
+/*************************************************************************
+** Function Declarations
+*************************************************************************/
 
 /**
- * Depth of pipe for commands to the TO_LAB application itself
+ * Library initialization routine/entry point
  */
-#define TO_LAB_CMD_PIPE_DEPTH 8
-
-/**
- * Depth of pipe for telemetry forwarded through the TO_LAB application
- */
-#define TO_LAB_TLM_PIPE_DEPTH OS_QUEUE_MAX_DEPTH
-
-#define cfgTLM_ADDR        "host.docker.internal"
-#define cfgTLM_PORT        1235
-#define TO_LAB_VERSION_NUM "5.1.0"
-
-/******************************************************************************/
-
-/*
-** Prototypes Section
-*/
-void TO_LAB_AppMain(void);
-
-/******************************************************************************/
+int32 COMMS_LIB_Init(void);
 
 #endif

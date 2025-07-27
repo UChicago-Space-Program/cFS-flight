@@ -18,47 +18,19 @@
 
 /**
  * @file
- *   Define TO Lab Application header file
+ *
+ * Define Comms App Message IDs
+ *
+ * \note The Comms App assumes default configuration which uses V1 of message id implementation
  */
 
-#ifndef TO_LAB_APP_H
-#define TO_LAB_APP_H
+#ifndef COMMS_APP_MSGIDS_H
+#define COMMS_APP_MSGIDS_H
 
-#include "cfe.h"
+/* V1 Command Message IDs must be 0x18xx */
+#define COMMS_APP_CMD_MID     0x1820
+#define COMMS_APP_SEND_HK_MID 0x1821
+/* V1 Telemetry Message IDs must be 0x08xx */
+#define COMMS_APP_HK_TLM_MID 0x0820
 
-#include <errno.h>
-#include <string.h>
-#include <unistd.h>
-
-#include "common_types.h"
-#include "osapi.h"
-
-/*****************************************************************************/
-
-#define TO_LAB_TASK_MSEC 500 /* run at 2 Hz */
-#define TO_LAB_UNUSED    CFE_SB_MSGID_RESERVED
-
-/**
- * Depth of pipe for commands to the TO_LAB application itself
- */
-#define TO_LAB_CMD_PIPE_DEPTH 8
-
-/**
- * Depth of pipe for telemetry forwarded through the TO_LAB application
- */
-#define TO_LAB_TLM_PIPE_DEPTH OS_QUEUE_MAX_DEPTH
-
-#define cfgTLM_ADDR        "host.docker.internal"
-#define cfgTLM_PORT        1235
-#define TO_LAB_VERSION_NUM "5.1.0"
-
-/******************************************************************************/
-
-/*
-** Prototypes Section
-*/
-void TO_LAB_AppMain(void);
-
-/******************************************************************************/
-
-#endif
+#endif /* COMMS_APP_MSGIDS_H */

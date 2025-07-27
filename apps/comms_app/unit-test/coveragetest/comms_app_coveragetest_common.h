@@ -18,47 +18,39 @@
 
 /**
  * @file
- *   Define TO Lab Application header file
+ *
+ * Common definitions for all comms_app coverage tests
  */
 
-#ifndef TO_LAB_APP_H
-#define TO_LAB_APP_H
-
-#include "cfe.h"
-
-#include <errno.h>
-#include <string.h>
-#include <unistd.h>
-
-#include "common_types.h"
-#include "osapi.h"
-
-/*****************************************************************************/
-
-#define TO_LAB_TASK_MSEC 500 /* run at 2 Hz */
-#define TO_LAB_UNUSED    CFE_SB_MSGID_RESERVED
-
-/**
- * Depth of pipe for commands to the TO_LAB application itself
- */
-#define TO_LAB_CMD_PIPE_DEPTH 8
-
-/**
- * Depth of pipe for telemetry forwarded through the TO_LAB application
- */
-#define TO_LAB_TLM_PIPE_DEPTH OS_QUEUE_MAX_DEPTH
-
-#define cfgTLM_ADDR        "host.docker.internal"
-#define cfgTLM_PORT        1235
-#define TO_LAB_VERSION_NUM "5.1.0"
-
-/******************************************************************************/
+#ifndef COMMS_APP_COVERAGETEST_COMMON_H
+#define COMMS_APP_COVERAGETEST_COMMON_H
 
 /*
-** Prototypes Section
-*/
-void TO_LAB_AppMain(void);
+ * Includes
+ */
 
-/******************************************************************************/
+#include "utassert.h"
+#include "uttest.h"
+#include "utstubs.h"
 
-#endif
+#include "cfe.h"
+#include "comms_app_events.h"
+#include "comms_app.h"
+#include "comms_app_table.h"
+
+/*
+ * Macro to add a test case to the list of tests to execute
+ */
+#define ADD_TEST(test) UtTest_Add((Test_##test), Comms_UT_Setup, Comms_UT_TearDown, #test)
+
+/*
+ * Setup function prior to every test
+ */
+void Comms_UT_Setup(void);
+
+/*
+ * Teardown function after every test
+ */
+void Comms_UT_TearDown(void);
+
+#endif /* COMMS_APP_COVERAGETEST_COMMON_H */

@@ -19,7 +19,7 @@
 #include "cfe_tbl_filedef.h" /* Required to obtain the CFE_TBL_FILEDEF macro definition */
 #include "sch_lab_table.h"
 #include "cfe_sb.h" /* Required to use the CFE_SB_MSGID_WRAP_VALUE macro */
-
+#include "comms_app_msgids.h"
 #ifdef HAVE_CI_LAB
 #include "ci_lab_msgids.h"
 #endif
@@ -77,6 +77,7 @@ SCH_LAB_ScheduleTable_t SCH_TBL_Structure = {.TickRate = 100,
                                                  {CFE_SB_MSGID_WRAP_VALUE(CFE_TIME_SEND_HK_MID), 98, 0},
                                                  {CFE_SB_MSGID_WRAP_VALUE(CFE_SB_SEND_HK_MID), 97, 0},
                                                  {CFE_SB_MSGID_WRAP_VALUE(CFE_EVS_SEND_HK_MID), 96, 0},
+                                                 {CFE_SB_MSGID_WRAP_VALUE(COMMS_APP_SEND_HK_MID), 82, 0},
 
                                             /* Example of including additional open source apps  */
                                             #ifdef HAVE_CI_LAB

@@ -134,6 +134,7 @@ class MiniCmdUtil:
 
     def send_packet(self):
         self.assemble_packet()
+        print(f"\n[DEBUG] Sending to {self.host}:{self.port}")
         print("Data to send:")
         for i, v in enumerate(self.packet):
             print(f"0x{format(v, '02X')}", end=" ")

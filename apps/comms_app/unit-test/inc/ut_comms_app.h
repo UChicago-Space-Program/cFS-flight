@@ -18,47 +18,33 @@
 
 /**
  * @file
- *   Define TO Lab Application header file
+ *
+ *
+ * Purpose:
+ * Extra scaffolding functions for the comms_app unit test
+ *
+ * Notes:
+ * This is an extra UT-specific extern declaration
+ * to obtain access to an internal data structure
+ *
+ * UT often needs to modify internal data structures in ways that
+ * actual applications never would (bypassing the normal API) in
+ * order to exercise or set up for off-nominal cases.
  */
 
-#ifndef TO_LAB_APP_H
-#define TO_LAB_APP_H
-
-#include "cfe.h"
-
-#include <errno.h>
-#include <string.h>
-#include <unistd.h>
-
-#include "common_types.h"
-#include "osapi.h"
-
-/*****************************************************************************/
-
-#define TO_LAB_TASK_MSEC 500 /* run at 2 Hz */
-#define TO_LAB_UNUSED    CFE_SB_MSGID_RESERVED
-
-/**
- * Depth of pipe for commands to the TO_LAB application itself
- */
-#define TO_LAB_CMD_PIPE_DEPTH 8
-
-/**
- * Depth of pipe for telemetry forwarded through the TO_LAB application
- */
-#define TO_LAB_TLM_PIPE_DEPTH OS_QUEUE_MAX_DEPTH
-
-#define cfgTLM_ADDR        "host.docker.internal"
-#define cfgTLM_PORT        1235
-#define TO_LAB_VERSION_NUM "5.1.0"
-
-/******************************************************************************/
+#ifndef UT_COMMS_APP_H
+#define UT_COMMS_APP_H
 
 /*
-** Prototypes Section
-*/
-void TO_LAB_AppMain(void);
+ * Necessary to include these here to get the definition of the
+ * "COMMS_APP_Data_t" typedef.
+ */
+#include "comms_app_events.h"
+#include "comms_app.h"
 
-/******************************************************************************/
+/*
+ * Allow UT access to the global "COMMS_APP_Data" object.
+ */
+extern COMMS_APP_Data_t COMMS_APP_Data;
 
-#endif
+#endif /* UT_COMMS_APP_H */
