@@ -268,6 +268,11 @@ void COMMS_APP_ProcessGroundCommand(CFE_SB_Buffer_t *SBBufPtr)
             }
 
             break;
+        case COMMS_APP_CANWR_CC:
+            if (COMMS_APP_VerifyCmdLength(&SBBufPtr->Msg, sizeof(COMMS_APP_CANCmd_t))){
+                COMMS_APP_CANCmd_t *cmd = (COMMS_APP_CANCmd_t *)SBBufPtr;
+                COMMS_APP_SendCAN(cmd->Bus, cmd->Id, cmd->Data);
+            }
 
         /* default case already found during FC vs length test */
         default:

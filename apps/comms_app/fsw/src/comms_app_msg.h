@@ -31,6 +31,7 @@
 #define COMMS_APP_NOOP_CC           0
 #define COMMS_APP_RESET_COUNTERS_CC 1
 #define COMMS_APP_PROCESS_CC        2
+#define COMMS_APP_CANWR_CC          3
 
 /*************************************************************************/
 
@@ -41,6 +42,15 @@ typedef struct
 {
     CFE_MSG_CommandHeader_t CmdHeader; /**< \brief Command header */
 } COMMS_APP_NoArgsCmd_t;
+
+typedef struct
+{
+    CFE_MSG_CommandHeader_t CmdHeader;
+    char Bus[8];             
+    char Id[8];              
+    char Data[32];        
+} COMMS_APP_CANCmd_t;
+
 
 /*
 ** The following commands all share the "NoArgs" format
