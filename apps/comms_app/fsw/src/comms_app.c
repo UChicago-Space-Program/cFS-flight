@@ -193,8 +193,8 @@ int32 COMMS_APP_Init(void)
 
     CFE_EVS_SendEvent(COMMS_APP_STARTUP_INF_EID, CFE_EVS_EventType_INFORMATION, "COMMS App Initialized.%s",
                       COMMS_APP_VERSION_STRING);
-    COMMS_APP_InitCAN("vcan0");
-    COMMS_APP_InitCAN("vcan1");
+    //COMMS_APP_InitCAN("vcan0");
+    //COMMS_APP_InitCAN("vcan1");
 
     return CFE_SUCCESS;
 }
