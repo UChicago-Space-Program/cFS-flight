@@ -48,6 +48,16 @@
 #include <net/if.h>         
 #include <linux/can.h>      
 #include <linux/can/raw.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <net/if.h>         // struct ifreq, IFNAMSIZ
+#include <linux/if.h>       // IFF_UP and flags
+#include <linux/can.h>      // struct can_frame
+#include <linux/can/raw.h>  // CAN_RAW
+#include <unistd.h>         // close()
+#include <string.h>         // strncpy, memset
+#include <stdlib.h>         // strtol
 
 /***********************************************************************/
 #define COMMS_APP_PIPE_DEPTH 32 /* Depth of the Command Pipe for Application */
@@ -115,6 +125,8 @@ int32 COMMS_APP_ResetCounters(const COMMS_APP_ResetCountersCmd_t *Msg);
 int32 COMMS_APP_Process(const COMMS_APP_ProcessCmd_t *Msg);
 int32 COMMS_APP_Noop(const COMMS_APP_NoopCmd_t *Msg);
 void  COMMS_APP_GetCrc(const char *TableName);
+int COMMS_APP_InitCAN(char *bus);
+int COMMS_APP_SendCAN(char *bus, char *id, char *message);
 
 int32 COMMS_APP_TblValidationFunc(void *TblData);
 
