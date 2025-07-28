@@ -323,7 +323,9 @@ int32 COMMS_APP_Noop(const COMMS_APP_NoopCmd_t *Msg)
 
     CFE_EVS_SendEvent(COMMS_APP_COMMANDNOP_INF_EID, CFE_EVS_EventType_INFORMATION, "COMMS: NOOP command %s",
                       COMMS_APP_VERSION);
-    COMMS_APP_SendCAN("vcan0", "123", "FA1AFE11");
+    COMMS_APP_SendCAN("vcan0", "123", "COCO");
+    COMMS_APP_SendCAN("vcan0", "123", "YODA");
+    COMMS_APP_SendCAN("vcan0", "123", "SAM");
 
     return CFE_SUCCESS;
 }
