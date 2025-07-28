@@ -464,7 +464,7 @@ void COMMS_APP_GetCrc(const char *TableName)
     }
 }
 
-int COMMS_APP_SendCAN(char *bus, char *id, char *message){
+int COMMS_APP_SendCAN(const char *bus, const char *id, const char *message){
     struct ifreq ifr;
     struct sockaddr_can addr;
     struct can_frame frame;
@@ -511,7 +511,7 @@ int COMMS_APP_SendCAN(char *bus, char *id, char *message){
 
 
 }
-int COMMS_APP_InitCAN(char *bus){
+int COMMS_APP_InitCAN(const char *bus){
     struct ifreq ifr;
 
     int sock = socket(AF_INET, SOCK_DGRAM, 0);

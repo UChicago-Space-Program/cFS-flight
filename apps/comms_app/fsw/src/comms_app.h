@@ -125,8 +125,8 @@ int32 COMMS_APP_ResetCounters(const COMMS_APP_ResetCountersCmd_t *Msg);
 int32 COMMS_APP_Process(const COMMS_APP_ProcessCmd_t *Msg);
 int32 COMMS_APP_Noop(const COMMS_APP_NoopCmd_t *Msg);
 void  COMMS_APP_GetCrc(const char *TableName);
-int COMMS_APP_InitCAN(char *bus);
-int COMMS_APP_SendCAN(char *bus, char *id, char *message);
+int COMMS_APP_InitCAN(const char *bus);
+int COMMS_APP_SendCAN(const char *bus, const char *id, const char *message);
 
 int32 COMMS_APP_TblValidationFunc(void *TblData);
 
