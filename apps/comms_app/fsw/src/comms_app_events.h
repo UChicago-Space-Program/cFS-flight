@@ -33,5 +33,6 @@
 #define COMMS_APP_INVALID_MSGID_ERR_EID 5
 #define COMMS_APP_LEN_ERR_EID           6
 #define COMMS_APP_PIPE_ERR_EID          7
+#define COMMS_APP_CAN_ERR_EID           8
 
 #endif /* COMMS_APP_EVENTS_H */

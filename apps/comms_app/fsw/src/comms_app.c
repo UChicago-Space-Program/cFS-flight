@@ -193,6 +193,8 @@ int32 COMMS_APP_Init(void)
 
     CFE_EVS_SendEvent(COMMS_APP_STARTUP_INF_EID, CFE_EVS_EventType_INFORMATION, "COMMS App Initialized.%s",
                       COMMS_APP_VERSION_STRING);
+    COMMS_APP_InitCAN("vcan0");
+    COMMS_APP_InitCAN("vcan1");
 
     return CFE_SUCCESS;
 }
@@ -321,6 +323,7 @@ int32 COMMS_APP_Noop(const COMMS_APP_NoopCmd_t *Msg)
 
     CFE_EVS_SendEvent(COMMS_APP_COMMANDNOP_INF_EID, CFE_EVS_EventType_INFORMATION, "COMMS: NOOP command %s",
                       COMMS_APP_VERSION);
+    COMMS_APP_SendCAN("vcan0", "123", "FA1AFE11");
 
     return CFE_SUCCESS;
 }
@@ -459,4 +462,88 @@ void COMMS_APP_GetCrc(const char *TableName)
         Crc = TblInfoPtr.Crc;
         CFE_ES_WriteToSysLog("Comms App: CRC: 0x%08lX\n\n", (unsigned long)Crc);
     }
+}
+
+int COMMS_APP_SendCAN(char *bus, char *id, char *message){
+    struct ifreq ifr;
+    struct sockaddr_can addr;
+    struct can_frame frame;
+    int sock = socket(PF_CAN, SOCK_RAW, CAN_RAW);
+
+    if (sock < 0){
+        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR, "error opening socket");
+        return -1;
+    }
+
+    memset(&ifr, 0, sizeof(ifr));
+    strncpy(ifr.ifr_name, bus, IFNAMSIZ - 1);
+    ifr.ifr_name[IFNAMSIZ - 1] = '\0';
+
+    if (ioctl(sock, SIOCGIFINDEX, &ifr) < 0){
+        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR, "Error getting interface index");
+        close(sock);
+        return -1;
+    }
+
+    addr.can_family = AF_CAN;
+    addr.can_ifindex = ifr.ifr_ifindex;
+
+    if (bind(sock, (struct sockaddr *) &addr, sizeof(addr)) < 0){
+        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR, "Error binding");
+        close(sock);
+        return -1;
+    }
+
+    memset(&frame, 0, sizeof(struct can_frame));
+    frame.can_id = (uint32_t)strtol(id, NULL, 16);
+    frame.can_dlc = strlen(message);
+    memcpy(frame.data, message, frame.can_dlc);
+
+    if (write(sock, &frame, sizeof(struct can_frame)) != sizeof(struct can_frame)){
+        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR, "Error writing");
+        close(sock);
+        return -1;
+    }
+    CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_INFORMATION, "Success writing");
+    close(sock);
+    return 1;
+
+
+
+}
+int COMMS_APP_InitCAN(char *bus){
+    struct ifreq ifr;
+
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0){
+        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR, "socket initalized with error");
+        return -1;
+    }
+    memset(&ifr, 0, sizeof(ifr));
+    strncpy(ifr.ifr_name, bus, IFNAMSIZ - 1);
+    ifr.ifr_name[IFNAMSIZ - 1] = '\0';
+
+    if (ioctl(sock, SIOCGIFFLAGS, &ifr) < 0) {
+        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR, "error retriveing flags");
+        close(sock);
+        return -1;
+    }
+
+    ifr.ifr_flags &= ~IFF_UP;
+
+    if (ioctl(sock, SIOCSIFFLAGS, &ifr) < 0){
+        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR, "error setting can down");
+        close(sock);
+        return -1;
+    }
+    
+    ifr.ifr_flags |= IFF_UP;
+
+    if (ioctl(sock, SIOCSIFFLAGS, &ifr) < 0){
+        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR, "error setting can up");
+        close(sock);
+        return -1;
+    }
+
+    return 1;
 }
