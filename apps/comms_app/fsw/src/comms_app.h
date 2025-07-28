@@ -38,6 +38,17 @@
 #include "comms_app_msgids.h"
 #include "comms_app_msg.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>         
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <net/if.h>         
+#include <linux/can.h>      
+#include <linux/can/raw.h>
+
 /***********************************************************************/
 #define COMMS_APP_PIPE_DEPTH 32 /* Depth of the Command Pipe for Application */
 
