@@ -193,8 +193,8 @@ int32 COMMS_APP_Init(void)
 
     CFE_EVS_SendEvent(COMMS_APP_STARTUP_INF_EID, CFE_EVS_EventType_INFORMATION, "COMMS App Initialized.%s",
                       COMMS_APP_VERSION_STRING);
-    //COMMS_APP_InitCAN("vcan0");
-    //COMMS_APP_InitCAN("vcan1");
+    COMMS_APP_InitCAN("vcan0");
+    COMMS_APP_InitCAN("vcan1");
 
     return CFE_SUCCESS;
 }
@@ -530,14 +530,14 @@ int COMMS_APP_InitCAN(const char *bus){
         close(sock);
         return -1;
     }
-
-    ifr.ifr_flags &= ~IFF_UP;
+    //uncomment if using can not vcan
+    /*ifr.ifr_flags &= ~IFF_UP;
 
     if (ioctl(sock, SIOCSIFFLAGS, &ifr) < 0){
         CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR, "error setting can down");
         close(sock);
         return -1;
-    }
+    }*/
     
     ifr.ifr_flags |= IFF_UP;
 
