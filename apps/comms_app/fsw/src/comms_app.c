@@ -196,6 +196,7 @@ int32 COMMS_APP_Init(void)
 
     CFE_EVS_SendEvent(COMMS_APP_STARTUP_INF_EID, CFE_EVS_EventType_INFORMATION, "COMMS App Initialized.%s",
                       COMMS_APP_VERSION_STRING);
+    csp_init();
     COMMS_APP_InitCAN("vcan0");
     
 
@@ -513,12 +514,12 @@ int COMMS_APP_SendCAN(const char *dest_str, const char *port_str, const char *me
                       "CSP CAN message sent to node %u port %u", dest, port);
     return 0;
 }
-//static csp_can_socketcan_handle_t can_handle;
+
 static csp_iface_t *COMMS_CAN_IFACE = NULL;
 
 
 int COMMS_APP_InitCAN(const char *bus) {
-    csp_init();
+    
     COMMS_CAN_IFACE = csp_can_socketcan_init(bus, 1 /* node ID */, 1000000, true);
     if (COMMS_CAN_IFACE == NULL) {
         CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
