@@ -482,7 +482,7 @@ int COMMS_APP_SendCAN(const char *dest_str, const char *port_str, const char *me
 
     if (len > CSP_BUFFER_SIZE) {
         CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
-                          "Message too long for CSP buffer (%u bytes)", len);
+                          "Message too long for CSP buffer (%zu bytes)", len);
         return -1;
     }
 
@@ -504,13 +504,8 @@ int COMMS_APP_SendCAN(const char *dest_str, const char *port_str, const char *me
     memcpy(packet->data, message, len);
     packet->length = len;
 
-    if (!csp_send(conn, packet)) {
-        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
-                          "Failed to send CSP packet");
-        csp_buffer_free(packet);
-        csp_close(conn);
-        return -1;
-    }
+    csp_send(conn, packet) 
+    
 
     csp_close(conn);
 
