@@ -504,7 +504,7 @@ int COMMS_APP_SendCAN(const char *dest_str, const char *port_str, const char *me
     memcpy(packet->data, message, len);
     packet->length = len;
 
-    csp_send(conn, packet) 
+    csp_send(conn, packet);
     
 
     csp_close(conn);
