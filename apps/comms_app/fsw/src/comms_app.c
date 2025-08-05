@@ -32,6 +32,9 @@
 /* The comms_lib module provides the COMMS_LIB_Function() prototype */
 #include <string.h>
 #include "comms_lib.h"
+#include <csp/csp.h>
+#include <csp/interfaces/csp_if_can.h>
+#include <csp/drivers/can_socketcan.h>
 
 /*
 ** global data
@@ -194,7 +197,7 @@ int32 COMMS_APP_Init(void)
     CFE_EVS_SendEvent(COMMS_APP_STARTUP_INF_EID, CFE_EVS_EventType_INFORMATION, "COMMS App Initialized.%s",
                       COMMS_APP_VERSION_STRING);
     COMMS_APP_InitCAN("vcan0");
-    COMMS_APP_InitCAN("vcan1");
+    
 
     return CFE_SUCCESS;
 }
@@ -329,9 +332,9 @@ int32 COMMS_APP_Noop(const COMMS_APP_NoopCmd_t *Msg)
 
     CFE_EVS_SendEvent(COMMS_APP_COMMANDNOP_INF_EID, CFE_EVS_EventType_INFORMATION, "COMMS: NOOP command %s",
                       COMMS_APP_VERSION);
-    COMMS_APP_SendCAN("vcan0", "123", "COCO");
-    COMMS_APP_SendCAN("vcan0", "123", "YODA");
-    COMMS_APP_SendCAN("vcan0", "123", "SAM");
+    COMMS_APP_SendCAN("2", "123", "COCO");
+    COMMS_APP_SendCAN("2", "123", "YODA");
+    COMMS_APP_SendCAN("2", "123", "SAM");
 
     return CFE_SUCCESS;
 }
@@ -472,86 +475,75 @@ void COMMS_APP_GetCrc(const char *TableName)
     }
 }
 
-int COMMS_APP_SendCAN(const char *bus, const char *id, const char *message){
-    struct ifreq ifr;
-    struct sockaddr_can addr;
-    struct can_frame frame;
-    int sock = socket(PF_CAN, SOCK_RAW, CAN_RAW);
+int COMMS_APP_SendCAN(const char *dest_str, const char *port_str, const char *message) {
+    uint8_t dest = (uint8_t) strtol(dest_str, NULL, 10);
+    uint8_t port = (uint8_t) strtol(port_str, NULL, 10);
+    size_t len = strlen(message);
 
-    if (sock < 0){
-        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR, "error opening socket");
+    if (len > CSP_BUFFER_SIZE) {
+        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
+                          "Message too long for CSP buffer (%u bytes)", len);
         return -1;
     }
 
-    memset(&ifr, 0, sizeof(ifr));
-    strncpy(ifr.ifr_name, bus, IFNAMSIZ - 1);
-    ifr.ifr_name[IFNAMSIZ - 1] = '\0';
-
-    if (ioctl(sock, SIOCGIFINDEX, &ifr) < 0){
-        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR, "Error getting interface index");
-        close(sock);
+    csp_conn_t *conn = csp_connect(CSP_PRIO_NORM, dest, port, 1000, CSP_O_NONE);
+    if (conn == NULL) {
+        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
+                          "Failed to connect to CSP node %u port %u", dest, port);
         return -1;
     }
 
-    addr.can_family = AF_CAN;
-    addr.can_ifindex = ifr.ifr_ifindex;
-
-    if (bind(sock, (struct sockaddr *) &addr, sizeof(addr)) < 0){
-        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR, "Error binding");
-        close(sock);
+    csp_packet_t *packet = csp_buffer_get(len);
+    if (packet == NULL) {
+        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
+                          "Failed to get CSP buffer");
+        csp_close(conn);
         return -1;
     }
 
-    memset(&frame, 0, sizeof(struct can_frame));
-    frame.can_id = (uint32_t)strtol(id, NULL, 16);
-    frame.can_dlc = strlen(message);
-    memcpy(frame.data, message, frame.can_dlc);
+    memcpy(packet->data, message, len);
+    packet->length = len;
 
-    if (write(sock, &frame, sizeof(struct can_frame)) != sizeof(struct can_frame)){
-        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR, "Error writing");
-        close(sock);
+    if (!csp_send(conn, packet, 1000)) {
+        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
+                          "Failed to send CSP packet");
+        csp_buffer_free(packet);
+        csp_close(conn);
         return -1;
     }
-    CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_INFORMATION, "Success writing");
-    close(sock);
-    return 1;
 
+    csp_close(conn);
 
-
+    CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_INFORMATION,
+                      "CSP CAN message sent to node %u port %u", dest, port);
+    return 0;
 }
-int COMMS_APP_InitCAN(const char *bus){
-    struct ifreq ifr;
-
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0){
-        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR, "socket initalized with error");
-        return -1;
-    }
-    memset(&ifr, 0, sizeof(ifr));
-    strncpy(ifr.ifr_name, bus, IFNAMSIZ - 1);
-    ifr.ifr_name[IFNAMSIZ - 1] = '\0';
-
-    if (ioctl(sock, SIOCGIFFLAGS, &ifr) < 0) {
-        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR, "error retriveing flags");
-        close(sock);
-        return -1;
-    }
-    //uncomment if using can not vcan
-    /*ifr.ifr_flags &= ~IFF_UP;
-
-    if (ioctl(sock, SIOCSIFFLAGS, &ifr) < 0){
-        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR, "error setting can down");
-        close(sock);
-        return -1;
-    }*/
-    
-    ifr.ifr_flags |= IFF_UP;
-
-    if (ioctl(sock, SIOCSIFFLAGS, &ifr) < 0){
-        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR, "error setting can up");
-        close(sock);
+static csp_can_socketcan_handle_t can_handle;
+static csp_iface_t *COMMS_CAN_IFACE = NULL;
+int COMMS_APP_InitCAN(const char *bus) {
+    // Open SocketCAN interface (e.g., "can0")
+    if (csp_can_socketcan_open(&can_handle, bus) != CSP_ERR_NONE) {
+        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
+                          "CSP CAN socketcan open failed on %s", bus);
         return -1;
     }
 
-    return 1;
+    // Initialize the CSP interface over CAN
+    COMMS_CAN_IFACE = csp_can_socketcan_init(&can_handle, CSP_IF_CAN_DEFAULT_NAME, 1); // local address = 1
+    if (COMMS_CAN_IFACE == NULL) {
+        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
+                          "CSP CAN interface init failed");
+        return -1;
+    }
+
+    // Start router task if not already started
+    if (csp_init() != CSP_ERR_NONE) {
+        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
+                          "CSP core init failed");
+        return -1;
+    }
+
+    CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_INFORMATION,
+                      "CSP CAN initialized successfully on %s", bus);
+    return 0;
 }
