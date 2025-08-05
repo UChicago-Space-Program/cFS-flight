@@ -197,7 +197,8 @@ int32 COMMS_APP_Init(void)
     CFE_EVS_SendEvent(COMMS_APP_STARTUP_INF_EID, CFE_EVS_EventType_INFORMATION, "COMMS App Initialized.%s",
                       COMMS_APP_VERSION_STRING);
     csp_init();
-    COMMS_APP_InitCAN("vcan0");
+    char n[] = "vcan0";
+    COMMS_APP_InitCAN(n);
     
 
     return CFE_SUCCESS;
@@ -519,9 +520,9 @@ static csp_iface_t *COMMS_CAN_IFACE = NULL;
 
 
 int COMMS_APP_InitCAN(const char *bus) {
-    printf('here1');
+    printf("here1");
     COMMS_CAN_IFACE = csp_can_socketcan_init(bus, 1 /* node ID */, 1000000, false);
-    printf('here2');
+    printf("here2");
     if (COMMS_CAN_IFACE == NULL) {
         CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
                           "CSP CAN interface init failed");
