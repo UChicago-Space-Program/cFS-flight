@@ -482,14 +482,14 @@ int COMMS_APP_SendCAN(const char *dest_str, const char *port_str, const char *me
 
     if (len > CSP_BUFFER_SIZE) {
         CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
-                          "Message too long for CSP buffer (%zu bytes)", len);
+                          "Message too long for CSP buffer (%u bytes)", len);
         return -1;
     }
 
     csp_conn_t *conn = csp_connect(CSP_PRIO_NORM, dest, port, 1000, CSP_O_NONE);
     if (conn == NULL) {
         CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
-                          "Failed to connect to CSP node %zu port %zu", dest, port);
+                          "Failed to connect to CSP node %u port %u", dest, port);
         return -1;
     }
 
@@ -515,7 +515,7 @@ int COMMS_APP_SendCAN(const char *dest_str, const char *port_str, const char *me
     csp_close(conn);
 
     CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_INFORMATION,
-                      "CSP CAN message sent to node %zu port %zu", dest, port);
+                      "CSP CAN message sent to node %u port %u", dest, port);
     return 0;
 }
 //static csp_can_socketcan_handle_t can_handle;
@@ -530,11 +530,7 @@ int COMMS_APP_InitCAN(const char *bus) {
         return -1;
     }
 
-    if (csp_init() != CSP_ERR_NONE) {
-        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
-                          "CSP core init failed");
-        return -1;
-    }
+    csp_init();
 
     CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_INFORMATION,
                       "CSP CAN initialized successfully on %s", bus);
