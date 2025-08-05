@@ -519,8 +519,9 @@ static csp_iface_t *COMMS_CAN_IFACE = NULL;
 
 
 int COMMS_APP_InitCAN(const char *bus) {
-    
-    COMMS_CAN_IFACE = csp_can_socketcan_init(bus, 1 /* node ID */, 1000000, true);
+    printf('here1');
+    COMMS_CAN_IFACE = csp_can_socketcan_init(bus, 1 /* node ID */, 1000000, false);
+    printf('here2');
     if (COMMS_CAN_IFACE == NULL) {
         CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
                           "CSP CAN interface init failed");
