@@ -482,14 +482,14 @@ int COMMS_APP_SendCAN(const char *dest_str, const char *port_str, const char *me
 
     if (len > CSP_BUFFER_SIZE) {
         CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
-                          "Message too long for CSP buffer (%u bytes)", len);
+                          "Message too long for CSP buffer (%zu bytes)", len);
         return -1;
     }
 
     csp_conn_t *conn = csp_connect(CSP_PRIO_NORM, dest, port, 1000, CSP_O_NONE);
     if (conn == NULL) {
         CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
-                          "Failed to connect to CSP node %u port %u", dest, port);
+                          "Failed to connect to CSP node %zu port %zu", dest, port);
         return -1;
     }
 
@@ -504,7 +504,7 @@ int COMMS_APP_SendCAN(const char *dest_str, const char *port_str, const char *me
     memcpy(packet->data, message, len);
     packet->length = len;
 
-    if (!csp_send(conn, packet, 1000)) {
+    if (!csp_send(conn, packet)) {
         CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
                           "Failed to send CSP packet");
         csp_buffer_free(packet);
@@ -515,28 +515,21 @@ int COMMS_APP_SendCAN(const char *dest_str, const char *port_str, const char *me
     csp_close(conn);
 
     CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_INFORMATION,
-                      "CSP CAN message sent to node %u port %u", dest, port);
+                      "CSP CAN message sent to node %zu port %zu", dest, port);
     return 0;
 }
-static csp_can_socketcan_handle_t can_handle;
+//static csp_can_socketcan_handle_t can_handle;
 static csp_iface_t *COMMS_CAN_IFACE = NULL;
-int COMMS_APP_InitCAN(const char *bus) {
-    // Open SocketCAN interface (e.g., "can0")
-    if (csp_can_socketcan_open(&can_handle, bus) != CSP_ERR_NONE) {
-        CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
-                          "CSP CAN socketcan open failed on %s", bus);
-        return -1;
-    }
 
-    // Initialize the CSP interface over CAN
-    COMMS_CAN_IFACE = csp_can_socketcan_init(&can_handle, CSP_IF_CAN_DEFAULT_NAME, 1); // local address = 1
+
+int COMMS_APP_InitCAN(const char *bus) {
+    COMMS_CAN_IFACE = csp_can_socketcan_init(bus, 1 /* node ID */, 1000000, true);
     if (COMMS_CAN_IFACE == NULL) {
         CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
                           "CSP CAN interface init failed");
         return -1;
     }
 
-    // Start router task if not already started
     if (csp_init() != CSP_ERR_NONE) {
         CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
                           "CSP core init failed");
