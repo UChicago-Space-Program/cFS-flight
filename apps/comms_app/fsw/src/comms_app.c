@@ -518,6 +518,7 @@ static csp_iface_t *COMMS_CAN_IFACE = NULL;
 
 
 int COMMS_APP_InitCAN(const char *bus) {
+    csp_init();
     COMMS_CAN_IFACE = csp_can_socketcan_init(bus, 1 /* node ID */, 1000000, true);
     if (COMMS_CAN_IFACE == NULL) {
         CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_ERROR,
@@ -525,7 +526,7 @@ int COMMS_APP_InitCAN(const char *bus) {
         return -1;
     }
 
-    csp_init();
+    
 
     CFE_EVS_SendEvent(COMMS_APP_CAN_ERR_EID, CFE_EVS_EventType_INFORMATION,
                       "CSP CAN initialized successfully on %s", bus);
