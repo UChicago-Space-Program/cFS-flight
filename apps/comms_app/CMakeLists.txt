@@ -4,27 +4,26 @@ add_cfe_app(comms_app fsw/src/comms_app.c)
 add_cfe_app_dependency(comms_app comms_lib)
 add_cfe_tables(comms_app fsw/tables/comms_app_tbl.c)
 
+# Include CSP headers
 target_include_directories(comms_app PUBLIC
   fsw/mission_inc
   fsw/platform_inc
   /usr/local/include  # CSP headers
 )
 
-# Explicitly find libcsp.so
-find_library(CSP_LIBRARY csp PATHS /usr/local/lib NO_DEFAULT_PATH)
+# Explicitly find and link against the shared CSP library
+find_library(CSP_LIBRARY NAMES csp PATHS /usr/local/lib NO_DEFAULT_PATH)
 
-# If found, link against it
-if (CSP_LIBRARY)
-  target_link_libraries(comms_app ${CSP_LIBRARY})
-else()
-  message(FATAL_ERROR "libcsp.so not found in /usr/local/lib")
+if (NOT CSP_LIBRARY)
+  message(FATAL_ERROR "libcsp.so not found in /usr/local/lib — ensure CSP is installed and built as a shared library")
 endif()
 
+target_link_libraries(comms_app ${CSP_LIBRARY})
 
-target_link_libraries(comms_app csp)  
-
+# Optional: add unit test subdirectory
 if (ENABLE_UNIT_TESTS)
   add_subdirectory(unit-test)
-endif ()
+endif()
+
 
 
