@@ -1,25 +1,58 @@
-#Build on x86_64 but run an ARMv7 userspace via QEMU
-FROM --platform=linux/arm/v7 arm32v7/debian:buster
+FROM debian:buster
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-#Point apt to the Debian archive (buster is EOL)
 RUN printf "deb http://archive.debian.org/debian buster main contrib non-free\n\
 deb http://archive.debian.org/debian buster-updates main contrib non-free\n\
 deb http://archive.debian.org/debian-security buster/updates main contrib non-free\n" > /etc/apt/sources.list \
+ && dpkg --add-architecture armhf \
  && apt-get -o Acquire::Check-Valid-Until=false update \
  && apt-get install -y --no-install-recommends \
     build-essential \
-    cmake \
     ninja-build \
     pkg-config \
     git \
     file \
+    libsocketcan-dev:armhf \
+    libsocketcan2:armhf \
+    curl \
+    ca-certificates \
+    wget \
+    gcc-arm-linux-gnueabihf \
+    g++-arm-linux-gnueabihf \
+    binutils-arm-linux-gnueabihf \
+    libc6-dev-armhf-cross \
+    qemu-user \
+ && update-ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-#Optional: sensible defaults for BBB’s Cortex-A8 hard-float
-ENV CFLAGS="-mcpu=cortex-a8 -mfpu=neon -mfloat-abi=hard" \
-    CXXFLAGS="-mcpu=cortex-a8 -mfpu=neon -mfloat-abi=hard"
+RUN apt-get -o Acquire::Check-Valid-Until=false update \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
+ && update-ca-certificates \
+ && ( \
+      curl -fL -o /tmp/cmake.sh https://github.com/Kitware/CMake/releases/download/v3.27.9/cmake-3.27.9-linux-x86_64.sh \
+      && bash /tmp/cmake.sh --skip-license --prefix=/usr/local \
+      && rm -f /tmp/cmake.sh \
+    || ( \
+      echo "Binary installer failed; falling back to source build" \
+      && curl -fL -o /tmp/cmake.tar.gz https://github.com/Kitware/CMake/archive/refs/tags/v3.27.9.tar.gz \
+      && cd /tmp && tar xf cmake.tar.gz && cd CMake-3.27.9 \
+      && ./bootstrap --prefix=/usr/local \
+      && make -j"$(nproc)" && make install \
+      && rm -rf /tmp/cmake* \
+    ) \
+ ) \
+ && cmake --version
 
-#Workdir inside container; your project gets mounted here at runtime
+ENV SYSROOT=/usr/arm-linux-gnueabihf \
+    CC=arm-linux-gnueabihf-gcc \
+    CXX=arm-linux-gnueabihf-g++ \
+    CFLAGS="-mcpu=cortex-a8 -mfpu=neon -mfloat-abi=hard" \
+    CXXFLAGS="-mcpu=cortex-a8 -mfpu=neon -mfloat-abi=hard" \
+    PKG_CONFIG_SYSROOT_DIR=/usr/arm-linux-gnueabihf \
+    PKG_CONFIG_PATH="/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/local/lib/arm-linux-gnueabihf/pkgconfig" \
+    PKG_CONFIG_LIBDIR="/usr/lib/arm-linux-gnueabihf:/usr/arm-linux-gnueabihf/usr/lib/arm-linux-gnueabihf:/usr/arm-linux-gnueabihf/usr/lib:/usr/arm-linux-gnueabihf/lib" \
+    QEMU_LD_PREFIX=/usr/arm-linux-gnueabihf
+
 WORKDIR /work
+
