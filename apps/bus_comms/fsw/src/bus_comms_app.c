@@ -25,8 +25,8 @@
 extern int32 OS_Milli2Ticks(uint32 milli_seconds, int *ticks);
 
 // CSP configuration (adjust as needed)
-#define BUS_COMMS_CSP_CAN_IF     "can0"
-#define BUS_COMMS_CSP_BITRATE    1000000
+#define BUS_COMMS_CSP_CAN_IF     "can1"
+#define BUS_COMMS_CSP_BITRATE    0
 #define BUS_COMMS_CSP_MY_ADDR    1
 #define BUS_COMMS_CSP_DEST_ADDR  2
 #define BUS_COMMS_CSP_PORT       10
@@ -224,6 +224,7 @@ int32 BUS_COMMS_AppInit(void)
             return CFE_STATUS_EXTERNAL_RESOURCE_FAIL;
         }
         iface->is_default = 1;
+        
 
         // Router child task
         status = CFE_ES_CreateChildTask(
@@ -239,6 +240,8 @@ int32 BUS_COMMS_AppInit(void)
             CFE_ES_WriteToSysLog("BUS_COMMS: CreateChildTask Router failed RC=0x%08lX\n", (unsigned long)status);
             return status;
         }
+        OS_TaskDelay(10);
+
 
         // Receiver child task
         status = CFE_ES_CreateChildTask(
@@ -414,33 +417,35 @@ static void BUS_COMMS_CSP_RouterTask(void)
 // Child task: CSP receiver (like your receiver.c)
 static void BUS_COMMS_CSP_ReceiverTask(void)
 {
-    csp_socket_t sock = {0};
+    csp_socket_t sock;
+    memset(&sock, 0, sizeof(sock));
+
     csp_bind(&sock, BUS_COMMS_CSP_PORT);
     csp_listen(&sock, 5);
 
     for (;;)
     {
         csp_conn_t *conn = csp_accept(&sock, 1000);
-        if (conn == NULL) {
+        if (conn == NULL)
             continue;
-        }
 
         csp_packet_t *packet = csp_read(conn, 1000);
         if (packet) {
-            // Update routing table based on source address and dport
-            uint8_t src = csp_conn_src(conn);
+            uint8_t  src   = csp_conn_src(conn);
             uint16_t dport = csp_conn_dport(conn);
             BUS_COMMS_RouteUpdateRx(src, dport);
 
             CFE_ES_WriteToSysLog("BUS_COMMS: CSP RX from %u:%u: %.*s\n",
-                                 src, dport, packet->length, (char *)packet->data);
+                                 src, dport, (int)packet->length, (char *)packet->data);
             csp_buffer_free(packet);
         }
 
         csp_close(conn);
     }
+
     CFE_ES_ExitChildTask();
 }
+
 
 // Child task: periodic CSP transmitter
 static void BUS_COMMS_CSP_TxTask(void)
