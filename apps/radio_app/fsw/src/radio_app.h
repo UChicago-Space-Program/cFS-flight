@@ -28,6 +28,8 @@
 /*
 ** Required header files.
 */
+#include <csp/csp.h>
+
 #include "cfe.h"
 #include "cfe_error.h"
 #include "cfe_evs.h"
@@ -52,6 +54,14 @@
 #define RADIO_APP_MAX_PACKET_SIZE 256
 #define RADIO_APP_CSP_TIMEOUT_MS  1000
 #define RADIO_APP_HK_CYCLE_MS     5000
+
+/* CSP Constants */
+#define CSP_OBC_NODE 1
+#define CPS_OBC_PORT 5
+#define RADIO_OBC_NODE 2
+#define RADIO_BOC_PORT 5
+#define RADIO_BIT_RATE 1000000
+
 /************************************************************************
 ** Type Definitions
 *************************************************************************/
@@ -107,6 +117,12 @@ typedef struct
     uint8  Modulation;
 
     /*
+    ** csp variables 
+    */
+    csp_iface_t *radio_iface;
+    csp_socket_t socket = { 0 };
+
+    /*
     ** Initialization data (not reported in housekeeping)...
     */
     char   PipeName[CFE_MISSION_MAX_API_LEN];
@@ -114,7 +130,18 @@ typedef struct
     uint16 PipeDepth;
 
     CFE_TBL_Handle_t TblHandles[RADIO_APP_NUMBER_OF_TABLES];
+    
+    CFE_TBL_Handle_t RadioConfigHandle;
 } RADIO_APP_Data_t;
+
+
+typedef struct {
+
+} RADIO_APP_Command_Packet;
+
+typedef struct {
+
+} RADIO_APP_Telemetry_Packet;
 
 /****************************************************************************/
 /*

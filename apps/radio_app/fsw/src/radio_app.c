@@ -29,9 +29,11 @@
 #include "radio_app.h"
 #include "radio_app_table.h"
 
-/* The sample_lib module provides the SAMPLE_LIB_Function() prototype */
+#include <csp/csp.h>
+#include <csp/drivers/usart.h>
+#include <csp/drivers/can_socketcan.h>
+#include <csp/interfaces/csp_if_zmqhub.h>
 #include <string.h>
-#include "sample_lib.h"
 
 /*
 ** global data
@@ -84,15 +86,21 @@ void RADIO_APP_Main(void)
 
         if (status == CFE_SUCCESS)
         {
-            SAMPLE_APP_ProcessCommandPacket(SBBufPtr);
+            RADIO_APP_ProcessCommandPacket(SBBufPtr);
         }
         else
         {
-            CFE_EVS_SendEvent(SAMPLE_APP_PIPE_ERR_EID, CFE_EVS_EventType_ERROR,
-                              "SAMPLE APP: SB Pipe Read Error, App Will Exit");
+            CFE_EVS_SendEvent(RADIO_APP_PIPE_ERR_EID, CFE_EVS_EventType_ERROR,
+                              "RADIO APP: SB Pipe Read Error, App Will Exit");
 
-            SAMPLE_APP_Data.RunStatus = CFE_ES_RunStatus_APP_ERROR;
+            RADIO_APP_Data.RunStatus = CFE_ES_RunStatus_APP_ERROR;
         }
+
+        /*
+        ** CSP Accept
+        */
+        csp_accept(&sock, 10000) 
+
     }
 
     /*
@@ -137,6 +145,11 @@ int32 RADIO_APP_Init(void)
         CFE_ES_WriteToSysLog("Radio App: Error Registering Events, RC = 0x%08lX\n", (unsigned long)status);
         return status;
     }
+
+    /*
+    ** Bind socket and listen
+    */
+    csp_socket
 
     /*
     ** Initialize housekeeping packet (clear user data area).

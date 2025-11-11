@@ -1,0 +1,15 @@
+{
+    "cmake.sourceDirectory": "/Users/akash/Documents/Projects/cubesat/cFS-flight/cfe",
+    "files.associations": {
+        "cfe_es.h": "c",
+        "__hash_table": "c",
+        "__split_buffer": "c",
+        "deque": "c",
+        "ios": "c",
+        "string": "c",
+        "unordered_map": "c",
+        "vector": "c",
+        "array": "c",
+        "string_view": "c"
+    }
+}

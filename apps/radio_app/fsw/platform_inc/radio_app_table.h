@@ -32,6 +32,6 @@ typedef struct
 {
     uint16 Int1;
     uint16 Int2;
-} RADIO_APP_Table_t;
+} RADIO_APP_Config_Table_t;
 
 #endif

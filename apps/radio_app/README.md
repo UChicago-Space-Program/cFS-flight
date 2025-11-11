@@ -7,7 +7,13 @@ Radio Manager is responsible for managing the state and configuration of the rad
 
 ## Use
 
+## In-Context
+
+Temperature sensor data sends data to radio manager app. It processes this into a radio-ready packet, send it to the Comms App with the necessary information. Radio doesn't do too much right now.
+
+
 ## Architecture
+
 
 ## Known issues
 
