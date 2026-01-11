@@ -1,0 +1,14 @@
+project(CFE_RADIO_APP C)
+
+# Create the app module
+add_cfe_app(radio_murgas_app fsw/src/radio_app.c)
+
+target_include_directories(radio_murgas_app PUBLIC
+  fsw/mission_inc
+  fsw/platform_inc
+)
+
+# If UT is enabled, then add the tests from the subdirectory
+if (ENABLE_UNIT_TESTS)
+  add_subdirectory(unit-test)
+endif (ENABLE_UNIT_TESTS)
