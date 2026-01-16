@@ -207,7 +207,7 @@ int32 RADIO_APP_Noop(const RADIO_APP_NoopCmd_t *Msg)
 {
     RADIO_APP_Data.CmdCounter++;
 
-    CFE_EVS_SendEvent(RADIO_APP_COMMANDNOP_INF_EID, CFE_EVS_EventType_INFORMATION, "RADIO: NOOP command %s",
+    CFE_EVS_SendEvent(RADIO_APP_COMMANDNOOP_INF_EID, CFE_EVS_EventType_INFORMATION, "RADIO: NOOP command %s",
                       RADIO_APP_VERSION);
 
     return CFE_SUCCESS;
@@ -218,7 +218,7 @@ int32 RADIO_APP_ResetCounters(const RADIO_APP_ResetCountersCmd_t *Msg)
     RADIO_APP_Data.CmdCounter = 0;
     RADIO_APP_Data.ErrCounter = 0;
 
-    CFE_EVS_SendEvent(RADIO_APP_COMMANDRST_INF_EID, CFE_EVS_EventType_INFORMATION, "RADIO: RESET command");
+    CFE_EVS_SendEvent(RADIO_APP_COMMANDRESET_INF_EID, CFE_EVS_EventType_INFORMATION, "RADIO: RESET command");
 
     return CFE_SUCCESS;
 }
