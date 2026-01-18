@@ -104,12 +104,12 @@ SET(MISSION_CPUNAMES cpu1 cpu2)
 SET(cpu1_PROCESSORID 1)
 SET(cpu1_APPLIST ci_lab to_lab sch_lab bus_comms)
 SET(cpu1_FILELIST cfe_es_startup.scr)
-SET(cpu1_SYSTEM arm-cortexa8_neon-linux-gnueabi)
+SET(cpu1_SYSTEM i686-linux-gnu)
 
 # CPU2 example.  This is not built by default anymore but
 # serves as an example of how one would configure multiple cpus.
 SET(cpu2_PROCESSORID 2)
 SET(cpu2_APPLIST ci_lab to_lab sch_lab bus_comms)
 SET(cpu2_FILELIST cfe_es_startup.scr)
-SET(cpu2_SYSTEM arm-cortexa8_neon-linux-gnueabi)
+SET(cpu2_SYSTEM i686-linux-gnu)
 

@@ -165,7 +165,8 @@ endif()
 
 configure_file(csp_autoconfig.h.in include/csp/autoconfig.h)
 
-if(NOT CSP_ZEPHYR)
+# Disable default install when building as part of cFS (handled by bus_comms CMakeLists)
+if(NOT CSP_ZEPHYR AND NOT CFE_SYSTEM_PSPNAME)
   install(TARGETS csp LIBRARY COMPONENT runtime)
   install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/include/;${CMAKE_CURRENT_SOURCE_DIR}/include/;
     TYPE INCLUDE

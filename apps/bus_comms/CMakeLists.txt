@@ -96,6 +96,15 @@ add_custom_command(TARGET bus_comms POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:csp> $<TARGET_FILE_DIR:bus_comms>
 )
 
+# Install libcsp.so alongside bus_comms.so for each target CPU
+if(APP_DYNAMIC_TARGET_LIST AND INSTALL_SUBDIR)
+  foreach(TGT ${APP_DYNAMIC_TARGET_LIST})
+    install(FILES $<TARGET_FILE:csp>
+      DESTINATION ${TGT}/${INSTALL_SUBDIR}
+    )
+  endforeach()
+endif()
+
 # Copy optional driver .so only if it is a SHARED/MODULE lib or executable
 function(_maybe_copy_target tgt)
   if(TARGET ${tgt})

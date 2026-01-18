@@ -11,45 +11,48 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// Add libcsp headers
 #include <csp/csp.h>
 #include <csp/csp_debug.h>
 #include <csp/interfaces/csp_if_can.h>
 #include <csp/drivers/can_socketcan.h>
 
-// Add cFE time for timestamps in routing table
 #include "cfe_time.h"
 #include "cfe_psp.h"
 #include "osapi.h"
 
 extern int32 OS_Milli2Ticks(uint32 milli_seconds, int *ticks);
 
-// CSP configuration (adjust as needed)
+/* CSP configuration */
 #define BUS_COMMS_CSP_CAN_IF     "can1"
 #define BUS_COMMS_CSP_BITRATE    0
 #define BUS_COMMS_CSP_MY_ADDR    1
 #define BUS_COMMS_CSP_DEST_ADDR  2
 #define BUS_COMMS_CSP_PORT       10
 
-// Child task IDs
+/* Request queue configuration */
+#define BUS_COMMS_REQUEST_QUEUE_DEPTH  16
+
+/* Child task IDs */
 static CFE_ES_TaskId_t BUS_COMMS_CSP_RouterTaskId   = CFE_ES_TASKID_UNDEFINED;
 static CFE_ES_TaskId_t BUS_COMMS_CSP_ReceiverTaskId = CFE_ES_TASKID_UNDEFINED;
-static CFE_ES_TaskId_t BUS_COMMS_CSP_TxTaskId       = CFE_ES_TASKID_UNDEFINED;
+static CFE_ES_TaskId_t BUS_COMMS_SBN_RxTaskId       = CFE_ES_TASKID_UNDEFINED;
 
-// New command codes (define locally if not provided by headers)
+/* Command codes */
 #ifndef BUS_COMMS_SEND_CSP_CC
 #define BUS_COMMS_SEND_CSP_CC        0x10
 #endif
 #ifndef BUS_COMMS_LIST_ROUTES_CC
 #define BUS_COMMS_LIST_ROUTES_CC     0x11
 #endif
+#ifndef BUS_COMMS_TEST_CAN_CC
+#define BUS_COMMS_TEST_CAN_CC        0x12   /* Test: send via SBN pipe like other apps would */
+#endif
 
-// Limits for routing and payloads
+/* Limits */
 #define BUS_COMMS_MAX_ROUTES          16
 #define BUS_COMMS_MAX_SEND_LEN        220
-#define BUS_COMMS_MAX_SOURCE_MAPPINGS 16
 
-// New routing table entry
+/* Routing table entry */
 typedef struct {
     uint8_t addr;
     uint16_t last_port;
@@ -58,26 +61,33 @@ typedef struct {
     CFE_TIME_SysTime_t last_seen;
 } bus_comms_route_entry_t;
 
-// Routing table (module-local)
 static bus_comms_route_entry_t g_routes[BUS_COMMS_MAX_ROUTES] = {0};
 static uint8_t g_route_count = 0;
 
-// Placeholder mapping between message sources and SBN pipes
-typedef struct
-{
-    CFE_SB_MsgId_t SourceMsgId;
-    uint16         SbnPublisherPipeId;
-    uint16         SbnSubscriberPipeId;
-    bool           InUse;
-} BUS_COMMS_SourcePipeMapEntry_t;
+/*
+ * Request queue - FIFO buffer for CAN requests from other apps.
+ * Protected by mutex for thread safety between SBN RX task and CSP TX processing.
+ */
+typedef struct {
+    BUS_COMMS_CanRequest_t entries[BUS_COMMS_REQUEST_QUEUE_DEPTH];
+    uint8_t head;
+    uint8_t tail;
+    uint8_t count;
+    osal_id_t mutex;
+} BUS_COMMS_RequestQueue_t;
 
-static BUS_COMMS_SourcePipeMapEntry_t g_source_pipe_map[BUS_COMMS_MAX_SOURCE_MAPPINGS] = {0};
-static bool g_missing_sbn_map_logged = false;
+static BUS_COMMS_RequestQueue_t g_request_queue;
 
-static const BUS_COMMS_SourcePipeMapEntry_t * BUS_COMMS_SourceToSbnMap(CFE_SB_MsgId_t msg_id);
-static void BUS_COMMS_SourcePipeMapInit(void);
+/* SBN pipe for receiving CAN requests from other apps */
+static CFE_SB_PipeId_t g_sbn_request_pipe;
 
-// Generic SEND_CSP command payload layout
+/* Telemetry counters */
+static uint16_t g_can_tx_count = 0;
+static uint16_t g_can_rx_count = 0;
+static uint16_t g_sbn_request_count = 0;
+static uint16_t g_sbn_response_count = 0;
+
+/* Generic SEND_CSP command payload (for ground commands) */
 typedef struct {
     CFE_MSG_CommandHeader_t CmdHdr;
     uint8_t  dest;
@@ -86,16 +96,22 @@ typedef struct {
     uint8_t  data[BUS_COMMS_MAX_SEND_LEN];
 } BUS_COMMS_SendCspCmd_t;
 
-// Forward declarations for new helpers
-static void BUS_COMMS_RouteUpdateRx(uint8_t addr, uint16_t port);
-static void BUS_COMMS_RouteUpdateTx(uint8_t addr, uint16_t port);
-static int  BUS_COMMS_CSP_Send(uint8_t dest, uint8_t port, const void * data, uint16_t len);
-static void BUS_COMMS_CSP_TxTask(void);
-static void BUS_COMMS_SelectNodeIds(void);
-
-// Forward declarations
+/* Forward declarations */
 static void BUS_COMMS_CSP_RouterTask(void);
 static void BUS_COMMS_CSP_ReceiverTask(void);
+static void BUS_COMMS_SBN_RxTask(void);
+static void BUS_COMMS_RouteUpdateRx(uint8_t addr, uint16_t port);
+static void BUS_COMMS_RouteUpdateTx(uint8_t addr, uint16_t port);
+static int  BUS_COMMS_CSP_Send(uint8_t dest, uint8_t port, const void *data, uint16_t len);
+static void BUS_COMMS_SelectNodeIds(void);
+static void BUS_COMMS_RequestQueueInit(void);
+static int  BUS_COMMS_RequestQueuePush(const BUS_COMMS_CanRequest_t *req);
+static int  BUS_COMMS_RequestQueuePop(BUS_COMMS_CanRequest_t *req);
+static void BUS_COMMS_PublishResponse(uint8_t subsystem, uint16_t sequence,
+                                       uint8_t src_node, uint8_t src_port,
+                                       uint8_t error_code,
+                                       const uint8_t *data, uint16_t data_len);
+static void BUS_COMMS_ProcessCanRequest(const BUS_COMMS_CanRequest_t *req);
 
 static uint8_t g_csp_my_addr   = BUS_COMMS_CSP_MY_ADDR;
 static uint8_t g_csp_dest_addr = BUS_COMMS_CSP_DEST_ADDR;
@@ -107,7 +123,6 @@ void BUS_COMMS_AppMain(void)
     int32            status;
     CFE_SB_Buffer_t *SBBufPtr;
 
-    /* Trace: entered AppMain */
     CFE_ES_WriteToSysLog("BUS_COMMS: AppMain entered\n");
 
     CFE_ES_PerfLogEntry(BUS_COMMS_APP_PERF_ID);
@@ -123,6 +138,8 @@ void BUS_COMMS_AppMain(void)
         CFE_ES_WriteToSysLog("BUS_COMMS: AppInit OK\n");
     }
 
+    /* Main loop processes ground commands and HK requests on the command pipe.
+     * SBN requests from other apps are handled by the SBN RX child task. */
     while (CFE_ES_RunLoop(&BUS_COMMS_AppData.RunStatus) == true)
     {
         CFE_ES_PerfLogExit(BUS_COMMS_APP_PERF_ID);
@@ -151,7 +168,6 @@ int32 BUS_COMMS_AppInit(void)
 {
     int32 status;
 
-    /* Trace: starting AppInit */
     CFE_ES_WriteToSysLog("BUS_COMMS: AppInit starting\n");
 
     BUS_COMMS_AppData.RunStatus = CFE_ES_RunStatus_APP_RUN;
@@ -168,18 +184,16 @@ int32 BUS_COMMS_AppInit(void)
         CFE_ES_WriteToSysLog("BUS_COMMS: Error Registering Events, RC = 0x%08lX\n", (unsigned long)status);
         return status;
     }
-    else
-    {
-        CFE_ES_WriteToSysLog("BUS_COMMS: EVS registered\n");
-    }
+    CFE_ES_WriteToSysLog("BUS_COMMS: EVS registered\n");
 
     CFE_MSG_Init(CFE_MSG_PTR(BUS_COMMS_AppData.HkTlm.TelemetryHeader), CFE_SB_ValueToMsgId(BUS_COMMS_HK_TLM_MID),
                  sizeof(BUS_COMMS_AppData.HkTlm));
 
+    /* Create command pipe for ground commands and HK requests */
     status = CFE_SB_CreatePipe(&BUS_COMMS_AppData.CmdPipe, BUS_COMMS_AppData.PipeDepth, BUS_COMMS_AppData.PipeName);
     if (status != CFE_SUCCESS)
     {
-        CFE_ES_WriteToSysLog("BUS_COMMS: Error creating pipe, RC = 0x%08lX\n", (unsigned long)status);
+        CFE_ES_WriteToSysLog("BUS_COMMS: Error creating cmd pipe, RC = 0x%08lX\n", (unsigned long)status);
         return status;
     }
 
@@ -197,14 +211,32 @@ int32 BUS_COMMS_AppInit(void)
         return status;
     }
 
-    // Initialize routing table and source/SBN map
+    /*
+     * Create a separate pipe for CAN requests from other apps (GPS, ADCS, Radio).
+     * This keeps high-volume inter-app traffic separate from ground commands.
+     */
+    status = CFE_SB_CreatePipe(&g_sbn_request_pipe, BUS_COMMS_REQUEST_QUEUE_DEPTH, "BUS_COMMS_SBN_PIPE");
+    if (status != CFE_SUCCESS)
+    {
+        CFE_ES_WriteToSysLog("BUS_COMMS: Error creating SBN pipe, RC = 0x%08lX\n", (unsigned long)status);
+        return status;
+    }
+
+    status = CFE_SB_Subscribe(CFE_SB_ValueToMsgId(BUS_COMMS_CAN_REQUEST_MID), g_sbn_request_pipe);
+    if (status != CFE_SUCCESS)
+    {
+        CFE_ES_WriteToSysLog("BUS_COMMS: Error subscribing to CAN_REQUEST, RC = 0x%08lX\n", (unsigned long)status);
+        return status;
+    }
+
+    /* Initialize the request queue and routing table */
+    BUS_COMMS_RequestQueueInit();
     memset(g_routes, 0, sizeof(g_routes));
     g_route_count = 0;
-    BUS_COMMS_SourcePipeMapInit();
 
     BUS_COMMS_SelectNodeIds();
 
-    // Initialize CSP and SocketCAN, spawn router, receiver, and periodic TX tasks
+    /* Initialize CSP and SocketCAN */
     do {
         int err;
         csp_iface_t *iface = NULL;
@@ -220,21 +252,20 @@ int32 BUS_COMMS_AppInit(void)
             false,
             &iface);
         if (err != CSP_ERR_NONE || iface == NULL) {
-            CFE_ES_WriteToSysLog("BUS_COMMS: CSP SocketCAN can0 open failed err=%d\n", err);
+            CFE_ES_WriteToSysLog("BUS_COMMS: CSP SocketCAN open failed err=%d\n", err);
             return CFE_STATUS_EXTERNAL_RESOURCE_FAIL;
         }
         iface->is_default = 1;
-        
 
-        // Router child task
+        /* CSP Router task - handles internal CSP routing */
         status = CFE_ES_CreateChildTask(
             &BUS_COMMS_CSP_RouterTaskId,
             "BC_CSP_ROUTER",
             BUS_COMMS_CSP_RouterTask,
             NULL,
-            16384,   /* stack */
-            60,       /* priority */
-            0        /* CPU affinity */
+            16384,
+            60,
+            0
         );
         if (status != CFE_SUCCESS) {
             CFE_ES_WriteToSysLog("BUS_COMMS: CreateChildTask Router failed RC=0x%08lX\n", (unsigned long)status);
@@ -242,8 +273,7 @@ int32 BUS_COMMS_AppInit(void)
         }
         OS_TaskDelay(10);
 
-
-        // Receiver child task
+        /* CSP Receiver task - receives from CAN and publishes responses to SBN */
         status = CFE_ES_CreateChildTask(
             &BUS_COMMS_CSP_ReceiverTaskId,
             "BC_CSP_RX",
@@ -254,35 +284,26 @@ int32 BUS_COMMS_AppInit(void)
             0
         );
         if (status != CFE_SUCCESS) {
-            CFE_ES_WriteToSysLog("BUS_COMMS: CreateChildTask Receiver failed RC=0x%08lX\n", (unsigned long)status);
+            CFE_ES_WriteToSysLog("BUS_COMMS: CreateChildTask CSP RX failed RC=0x%08lX\n", (unsigned long)status);
             return status;
         }
 
+        /* SBN Receiver task - receives requests from other apps and queues them for CAN TX */
         status = CFE_ES_CreateChildTask(
-            &BUS_COMMS_CSP_TxTaskId,
-            "BC_CSP_TX",
-            BUS_COMMS_CSP_TxTask,
+            &BUS_COMMS_SBN_RxTaskId,
+            "BC_SBN_RX",
+            BUS_COMMS_SBN_RxTask,
             NULL,
             16384,
             55,
             0
         );
         if (status != CFE_SUCCESS) {
-            CFE_ES_WriteToSysLog("BUS_COMMS: CreateChildTask TX failed RC=0x%08lX\n", (unsigned long)status);
+            CFE_ES_WriteToSysLog("BUS_COMMS: CreateChildTask SBN RX failed RC=0x%08lX\n", (unsigned long)status);
             return status;
         }
 
-        
     } while (0);
-
-    /* send a quick CSP ping on startup so external tools can verify connectivity */
-    const char *startup_msg = "BUS_COMMS startup ping";
-
-    if (BUS_COMMS_CSP_Send(g_csp_dest_addr, BUS_COMMS_CSP_PORT, startup_msg,
-                            (uint16_t)strlen(startup_msg)) != 0)
-    {
-        CFE_ES_WriteToSysLog("BUS_COMMS: startup CSP send failed\n");
-    }
 
     CFE_EVS_SendEvent(BUS_COMMS_STARTUP_INF_EID, CFE_EVS_EventType_INFORMATION, "BUS_COMMS App Initialized. %s",
                       BUS_COMMS_VERSION_STRING);
@@ -385,6 +406,37 @@ void BUS_COMMS_ProcessGroundCommand(CFE_SB_Buffer_t *SBBufPtr)
             break;
         }
 
+        case BUS_COMMS_TEST_CAN_CC: {
+            /* Test command: publish a CAN request message on the SBN pipe
+             * This simulates what GPS/ADCS/Radio apps would do */
+            BUS_COMMS_TestCanCmd_t *cmd = (BUS_COMMS_TestCanCmd_t *)SBBufPtr;
+            
+            /* Build a CAN request message and publish it */
+            BUS_COMMS_CanRequest_t req;
+            CFE_MSG_Init(CFE_MSG_PTR(req.Header), CFE_SB_ValueToMsgId(BUS_COMMS_CAN_REQUEST_MID),
+                         sizeof(BUS_COMMS_CanRequest_t));
+            
+            req.direction = BUS_COMMS_DIR_REQUEST;
+            req.subsystem = BUS_COMMS_SUBSYS_GROUND;  /* From ground test */
+            req.dest_node = cmd->dest_node;
+            req.dest_port = cmd->dest_port;
+            req.sequence  = (uint16_t)(BUS_COMMS_AppData.CmdCounter & 0xFFFF);
+            req.data_len  = cmd->data_len;
+            if (req.data_len > BUS_COMMS_CAN_MAX_DATA_LEN) {
+                req.data_len = BUS_COMMS_CAN_MAX_DATA_LEN;
+            }
+            memcpy(req.data, cmd->data, req.data_len);
+            
+            /* Publish to the SBN - our SBN RX task will pick it up and process it */
+            CFE_SB_TransmitMsg(CFE_MSG_PTR(req.Header), true);
+            
+            CFE_EVS_SendEvent(BUS_COMMS_COMMANDNOP_INF_EID, CFE_EVS_EventType_INFORMATION,
+                              "BUS_COMMS: TEST_CAN published request to node=%u port=%u len=%u",
+                              cmd->dest_node, cmd->dest_port, req.data_len);
+            BUS_COMMS_AppData.CmdCounter++;
+            break;
+        }
+
         default:
             CFE_EVS_SendEvent(BUS_COMMS_COMMAND_ERR_EID, CFE_EVS_EventType_ERROR,
                               "BUS_COMMS: Invalid ground command code: CC = %d", CommandCode);
@@ -395,8 +447,13 @@ void BUS_COMMS_ProcessGroundCommand(CFE_SB_Buffer_t *SBBufPtr)
 
 int32 BUS_COMMS_ReportHousekeeping(const CFE_MSG_CommandHeader_t *Msg)
 {
-    BUS_COMMS_AppData.HkTlm.Payload.CommandErrorCounter = BUS_COMMS_AppData.ErrCounter;
     BUS_COMMS_AppData.HkTlm.Payload.CommandCounter      = BUS_COMMS_AppData.CmdCounter;
+    BUS_COMMS_AppData.HkTlm.Payload.CommandErrorCounter = BUS_COMMS_AppData.ErrCounter;
+    BUS_COMMS_AppData.HkTlm.Payload.CanTxCount          = g_can_tx_count;
+    BUS_COMMS_AppData.HkTlm.Payload.CanRxCount          = g_can_rx_count;
+    BUS_COMMS_AppData.HkTlm.Payload.SbnRequestCount     = g_sbn_request_count;
+    BUS_COMMS_AppData.HkTlm.Payload.SbnResponseCount    = g_sbn_response_count;
+    BUS_COMMS_AppData.HkTlm.Payload.QueueDepth          = g_request_queue.count;
 
     CFE_SB_TimeStampMsg(CFE_MSG_PTR(BUS_COMMS_AppData.HkTlm.TelemetryHeader));
     CFE_SB_TransmitMsg(CFE_MSG_PTR(BUS_COMMS_AppData.HkTlm.TelemetryHeader), true);
@@ -404,7 +461,7 @@ int32 BUS_COMMS_ReportHousekeeping(const CFE_MSG_CommandHeader_t *Msg)
     return CFE_SUCCESS;
 }
 
-// Child task: CSP router
+/* CSP Router task - internal CSP routing */
 static void BUS_COMMS_CSP_RouterTask(void)
 {
     for (;;)
@@ -414,14 +471,17 @@ static void BUS_COMMS_CSP_RouterTask(void)
     CFE_ES_ExitChildTask();
 }
 
-// Child task: CSP receiver (like your receiver.c)
+/*
+ * CSP Receiver task - receives data from CAN bus and publishes to SBN.
+ * Hardware responses come in here and get forwarded to requesting apps.
+ */
 static void BUS_COMMS_CSP_ReceiverTask(void)
 {
     csp_socket_t sock;
     memset(&sock, 0, sizeof(sock));
 
-    csp_bind(&sock, BUS_COMMS_CSP_PORT);
-    csp_listen(&sock, 5);
+    csp_bind(&sock, CSP_ANY);
+    csp_listen(&sock, 10);
 
     for (;;)
     {
@@ -431,12 +491,31 @@ static void BUS_COMMS_CSP_ReceiverTask(void)
 
         csp_packet_t *packet = csp_read(conn, 1000);
         if (packet) {
-            uint8_t  src   = csp_conn_src(conn);
-            uint16_t dport = csp_conn_dport(conn);
-            BUS_COMMS_RouteUpdateRx(src, dport);
+            uint8_t  src_node = csp_conn_src(conn);
+            uint16_t src_port = csp_conn_sport(conn);
 
-            CFE_ES_WriteToSysLog("BUS_COMMS: CSP RX from %u:%u: %.*s\n",
-                                 src, dport, (int)packet->length, (char *)packet->data);
+            BUS_COMMS_RouteUpdateRx(src_node, src_port);
+            g_can_rx_count++;
+
+            CFE_ES_WriteToSysLog("BUS_COMMS: CAN RX from node %u port %u len %u\n",
+                                 src_node, src_port, packet->length);
+
+            /*
+             * Publish this response on the SBN for subscribing apps.
+             * For now we use SUBSYS_UNKNOWN and sequence 0 since we don't have
+             * request correlation yet. A more complete implementation would
+             * track pending requests and match responses.
+             */
+            BUS_COMMS_PublishResponse(
+                BUS_COMMS_SUBSYS_UNKNOWN,
+                0,
+                src_node,
+                (uint8_t)src_port,
+                BUS_COMMS_ERR_NONE,
+                packet->data,
+                packet->length
+            );
+
             csp_buffer_free(packet);
         }
 
@@ -446,29 +525,84 @@ static void BUS_COMMS_CSP_ReceiverTask(void)
     CFE_ES_ExitChildTask();
 }
 
-
-// Child task: periodic CSP transmitter
-static void BUS_COMMS_CSP_TxTask(void)
+/*
+ * SBN Receiver task - receives CAN requests from other apps via software bus.
+ * Processes them FIFO by sending to CAN and publishing responses.
+ */
+static void BUS_COMMS_SBN_RxTask(void)
 {
-    const char payload[] = "BUS_COMMS periodic ping";
-    int        delay_ticks = 0;
+    int32            status;
+    CFE_SB_Buffer_t *buf_ptr;
 
-    while (1)
+    CFE_ES_WriteToSysLog("BUS_COMMS: SBN RX task started\n");
+
+    for (;;)
     {
-        if (BUS_COMMS_CSP_Send(g_csp_dest_addr, BUS_COMMS_CSP_PORT, payload, (uint16_t)(sizeof(payload) - 1)) != 0)
-        {
-            CFE_ES_WriteToSysLog("BUS_COMMS: periodic CSP send failed\n");
-        }
+        status = CFE_SB_ReceiveBuffer(&buf_ptr, g_sbn_request_pipe, 100);
 
-        if (OS_Milli2Ticks(25000, &delay_ticks) != OS_SUCCESS || delay_ticks <= 0)
+        if (status == CFE_SUCCESS)
         {
-            delay_ticks = 25000;
-        }
+            CFE_SB_MsgId_t msg_id = CFE_SB_INVALID_MSG_ID;
+            CFE_MSG_GetMsgId(&buf_ptr->Msg, &msg_id);
 
-        OS_TaskDelay((uint32)delay_ticks);
+            if (CFE_SB_MsgIdToValue(msg_id) == BUS_COMMS_CAN_REQUEST_MID)
+            {
+                BUS_COMMS_CanRequest_t *req = (BUS_COMMS_CanRequest_t *)buf_ptr;
+
+                g_sbn_request_count++;
+
+                CFE_ES_WriteToSysLog("BUS_COMMS: SBN request from subsys %u to node %u port %u len %u\n",
+                                     req->subsystem, req->dest_node, req->dest_port, req->data_len);
+
+                /* Process the request immediately (FIFO - this task handles them in order) */
+                BUS_COMMS_ProcessCanRequest(req);
+            }
+        }
+        else if (status != CFE_SB_TIME_OUT && status != CFE_SB_NO_MESSAGE)
+        {
+            CFE_ES_WriteToSysLog("BUS_COMMS: SBN pipe error 0x%08lX\n", (unsigned long)status);
+        }
     }
 
     CFE_ES_ExitChildTask();
+}
+
+/*
+ * Process a CAN request - send data over CAN to the destination node.
+ * Publishes a response (success or error) back to the requesting app.
+ */
+static void BUS_COMMS_ProcessCanRequest(const BUS_COMMS_CanRequest_t *req)
+{
+    uint8_t error_code = BUS_COMMS_ERR_NONE;
+
+    if (req->data_len > BUS_COMMS_CAN_MAX_DATA_LEN) {
+        error_code = BUS_COMMS_ERR_PAYLOAD_SIZE;
+        CFE_ES_WriteToSysLog("BUS_COMMS: request payload too large %u\n", req->data_len);
+    }
+    else if (req->dest_node == 0) {
+        error_code = BUS_COMMS_ERR_INVALID_DEST;
+        CFE_ES_WriteToSysLog("BUS_COMMS: invalid dest node 0\n");
+    }
+    else {
+        int rc = BUS_COMMS_CSP_Send(req->dest_node, req->dest_port, req->data, req->data_len);
+        if (rc != 0) {
+            error_code = BUS_COMMS_ERR_CAN_TX_FAIL;
+        }
+    }
+
+    /*
+     * Publish an acknowledgment response. For actual hardware responses,
+     * the CSP RX task will publish them when they arrive.
+     */
+    BUS_COMMS_PublishResponse(
+        req->subsystem,
+        req->sequence,
+        req->dest_node,
+        req->dest_port,
+        error_code,
+        NULL,
+        0
+    );
 }
 
 
@@ -507,19 +641,11 @@ static void BUS_COMMS_RouteUpdateTx(uint8_t addr, uint16_t port) {
     }
 }
 
-// Generic CSP sender with accounting
-static int BUS_COMMS_CSP_Send(uint8_t dest, uint8_t port, const void * data, uint16_t len) {
+/* Send data over CSP/CAN to a destination node */
+static int BUS_COMMS_CSP_Send(uint8_t dest, uint8_t port, const void *data, uint16_t len) {
     if (len == 0 || data == NULL) {
         CFE_ES_WriteToSysLog("BUS_COMMS: CSP send invalid params\n");
         return -1;
-    }
-
-    // Placeholder to demonstrate how a source/SBN mapping lookup could be incorporated later on.
-    // Today we use the message ID associated with the command pipe since actual mappings are TBD.
-    const BUS_COMMS_SourcePipeMapEntry_t *map_entry = BUS_COMMS_SourceToSbnMap(CFE_SB_ValueToMsgId(BUS_COMMS_CMD_MID));
-    if (map_entry == NULL && !g_missing_sbn_map_logged) {
-        g_missing_sbn_map_logged = true;
-        CFE_ES_WriteToSysLog("BUS_COMMS: no SBN map entry for command MID\n");
     }
 
     csp_conn_t *conn = csp_connect(CSP_PRIO_NORM, dest, port, 1000, CSP_O_NONE);
@@ -538,16 +664,15 @@ static int BUS_COMMS_CSP_Send(uint8_t dest, uint8_t port, const void * data, uin
     memcpy(packet->data, data, len);
     packet->length = len;
 
-    // libcsp in your build returns void from csp_send; it takes ownership of 'packet'
     csp_send(conn, packet);
 
     BUS_COMMS_RouteUpdateTx(dest, port);
+    g_can_tx_count++;
     csp_close(conn);
     return 0;
 }
 
-// ------------------ Source/SBN mapping helpers ------------------
-
+/* Select CSP node IDs based on CPU ID */
 static void BUS_COMMS_SelectNodeIds(void)
 {
     uint32 cpu_id = CFE_PSP_GetProcessorId();
@@ -570,32 +695,97 @@ static void BUS_COMMS_SelectNodeIds(void)
             break;
     }
 
-    CFE_ES_WriteToSysLog("BUS_COMMS: CPU=%lu my=%u dest=%u\n",
+    CFE_ES_WriteToSysLog("BUS_COMMS: CPU=%lu my_addr=%u dest_addr=%u\n",
                          (unsigned long)cpu_id,
                          (unsigned)g_csp_my_addr,
                          (unsigned)g_csp_dest_addr);
 }
 
-static void BUS_COMMS_SourcePipeMapInit(void)
+/* Initialize the request queue */
+static void BUS_COMMS_RequestQueueInit(void)
 {
-    memset(g_source_pipe_map, 0, sizeof(g_source_pipe_map));
+    memset(&g_request_queue, 0, sizeof(g_request_queue));
+    g_request_queue.head = 0;
+    g_request_queue.tail = 0;
+    g_request_queue.count = 0;
 
-    // Default entry demonstrating how mappings can be pre-seeded.
-    g_source_pipe_map[0].SourceMsgId          = CFE_SB_ValueToMsgId(BUS_COMMS_CMD_MID);
-    g_source_pipe_map[0].SbnPublisherPipeId   = 0; /* placeholder */
-    g_source_pipe_map[0].SbnSubscriberPipeId  = 0; /* placeholder */
-    g_source_pipe_map[0].InUse                = true;
+    int32 status = OS_MutSemCreate(&g_request_queue.mutex, "BC_Q_MTX", 0);
+    if (status != OS_SUCCESS) {
+        CFE_ES_WriteToSysLog("BUS_COMMS: Failed to create queue mutex\n");
+    }
 }
 
-static const BUS_COMMS_SourcePipeMapEntry_t * BUS_COMMS_SourceToSbnMap(CFE_SB_MsgId_t msg_id)
+/* Push a request onto the queue (available for future async processing) */
+__attribute__((unused))
+static int BUS_COMMS_RequestQueuePush(const BUS_COMMS_CanRequest_t *req)
 {
-    for (size_t i = 0; i < BUS_COMMS_MAX_SOURCE_MAPPINGS; ++i)
-    {
-        if (g_source_pipe_map[i].InUse && CFE_SB_MsgId_Equal(g_source_pipe_map[i].SourceMsgId, msg_id))
-        {
-            return &g_source_pipe_map[i];
-        }
+    int rc = -1;
+
+    OS_MutSemTake(g_request_queue.mutex);
+
+    if (g_request_queue.count < BUS_COMMS_REQUEST_QUEUE_DEPTH) {
+        memcpy(&g_request_queue.entries[g_request_queue.tail], req, sizeof(*req));
+        g_request_queue.tail = (g_request_queue.tail + 1) % BUS_COMMS_REQUEST_QUEUE_DEPTH;
+        g_request_queue.count++;
+        rc = 0;
     }
 
-    return NULL;
+    OS_MutSemGive(g_request_queue.mutex);
+    return rc;
+}
+
+/* Pop a request from the queue (available for future async processing) */
+__attribute__((unused))
+static int BUS_COMMS_RequestQueuePop(BUS_COMMS_CanRequest_t *req)
+{
+    int rc = -1;
+
+    OS_MutSemTake(g_request_queue.mutex);
+
+    if (g_request_queue.count > 0) {
+        memcpy(req, &g_request_queue.entries[g_request_queue.head], sizeof(*req));
+        g_request_queue.head = (g_request_queue.head + 1) % BUS_COMMS_REQUEST_QUEUE_DEPTH;
+        g_request_queue.count--;
+        rc = 0;
+    }
+
+    OS_MutSemGive(g_request_queue.mutex);
+    return rc;
+}
+
+/*
+ * Publish a CAN response message on the software bus.
+ * Other apps subscribed to BUS_COMMS_CAN_RESPONSE_MID will receive this.
+ */
+static void BUS_COMMS_PublishResponse(uint8_t subsystem, uint16_t sequence,
+                                       uint8_t src_node, uint8_t src_port,
+                                       uint8_t error_code,
+                                       const uint8_t *data, uint16_t data_len)
+{
+    BUS_COMMS_CanResponse_t resp;
+
+    CFE_MSG_Init(CFE_MSG_PTR(resp.Header), CFE_SB_ValueToMsgId(BUS_COMMS_CAN_RESPONSE_MID), sizeof(resp));
+
+    resp.direction  = BUS_COMMS_DIR_RESPONSE;
+    resp.subsystem  = subsystem;
+    resp.src_node   = src_node;
+    resp.src_port   = src_port;
+    resp.sequence   = sequence;
+    resp.error_code = error_code;
+    resp.spare      = 0;
+
+    if (data != NULL && data_len > 0) {
+        if (data_len > BUS_COMMS_CAN_MAX_DATA_LEN) {
+            data_len = BUS_COMMS_CAN_MAX_DATA_LEN;
+        }
+        memcpy(resp.data, data, data_len);
+        resp.data_len = data_len;
+    } else {
+        resp.data_len = 0;
+    }
+
+    CFE_SB_TimeStampMsg(CFE_MSG_PTR(resp.Header));
+    CFE_SB_TransmitMsg(CFE_MSG_PTR(resp.Header), true);
+
+    g_sbn_response_count++;
 }
