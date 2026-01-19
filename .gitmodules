@@ -1,0 +1,3 @@
+[submodule "apps/adcs_app"]
+	path = apps/adcs_app
+	url = git@github.com:UChicago-Space-Program/adcs_app.git
