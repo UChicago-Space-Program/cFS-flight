@@ -19,8 +19,10 @@
 #include "radio_app_events.h"
 #include "radio_app_version.h"
 #include "radio_app.h"
+#include "radio_app_table.h"
 #include "bus_comms_msg.h"
 #include "bus_comms_msgids.h"
+#include "osapi-file.h"
 #include <string.h>
 
 #define RADIO_APP_RADIO_NODE_ADDR 2
@@ -112,6 +114,17 @@ int32 RADIO_APP_Init(void)
         return status;
     }
 
+    status = CFE_TBL_Register(&RADIO_APP_Data.TblHandles[0], "RadioAppTable", sizeof(RADIO_APP_Table_t),
+                              CFE_TBL_OPT_DEFAULT, RADIO_APP_TblValidationFunc);
+    if (status != CFE_SUCCESS)
+    {
+        CFE_ES_WriteToSysLog("Radio App: Error Registering Table, RC = 0x%08lX\n", (unsigned long)status);
+        return status;
+    }
+    else
+    {
+        status = CFE_TBL_Load(RADIO_APP_Data.TblHandles[0], CFE_TBL_SRC_FILE, RADIO_APP_TABLE_FILE);
+    }
 
     CFE_EVS_SendEvent(RADIO_APP_STARTUP_INF_EID, CFE_EVS_EventType_INFORMATION, "Radio App Initialized.%s",
                       RADIO_APP_VERSION_STRING);
@@ -185,6 +198,13 @@ void RADIO_APP_ProcessGroundCommand(CFE_SB_Buffer_t *SBBufPtr)
             }
             break;
 
+        case RADIO_APP_TRANSMIT_FILE_CC:
+            if (RADIO_APP_VerifyCmdLength(&SBBufPtr->Msg, sizeof(RADIO_APP_TransmitFileCmd_t)))
+            {
+                RADIO_APP_TransmitFile((RADIO_APP_TransmitFileCmd_t *)SBBufPtr);
+            }
+            break;
+
         default:
             CFE_EVS_SendEvent(RADIO_APP_COMMAND_ERR_EID, CFE_EVS_EventType_ERROR,
                               "Invalid ground command code: CC = %d", CommandCode);
@@ -194,11 +214,20 @@ void RADIO_APP_ProcessGroundCommand(CFE_SB_Buffer_t *SBBufPtr)
 
 int32 RADIO_APP_ReportHousekeeping(const CFE_MSG_CommandHeader_t *Msg)
 {
+    int i;
+
     RADIO_APP_Data.HkTlm.Payload.CommandErrorCounter = RADIO_APP_Data.ErrCounter;
     RADIO_APP_Data.HkTlm.Payload.CommandCounter      = RADIO_APP_Data.CmdCounter;
 
     CFE_SB_TimeStampMsg(CFE_MSG_PTR(RADIO_APP_Data.HkTlm.TelemetryHeader));
     CFE_SB_TransmitMsg(CFE_MSG_PTR(RADIO_APP_Data.HkTlm.TelemetryHeader), true);
+
+    for (i = 0; i < RADIO_APP_NUMBER_OF_TABLES; i++)
+    {
+        CFE_TBL_Manage(RADIO_APP_Data.TblHandles[i]);
+    }
+
+    RADIO_APP_ProcessTableUpdate();
 
     return CFE_SUCCESS;
 }
@@ -287,6 +316,105 @@ int32 RADIO_APP_RequestHousekeeping(const RADIO_APP_HkRequestCmd_t *Msg)
     return RADIO_APP_ReportHousekeeping((CFE_MSG_CommandHeader_t *)Msg);
 }
 
+int32 RADIO_APP_TransmitFile(const RADIO_APP_TransmitFileCmd_t *Msg)
+{
+    int32      status;
+    osal_id_t  FileHandle = OS_OBJECT_ID_UNDEFINED;
+    int32      OsStatus;
+    uint8      ChunkBuffer[BUS_COMMS_MAX_SEND_LEN];
+    int32      BytesRead;
+    uint32     TotalBytesSent = 0;
+    uint16     ChunkCount     = 0;
+    size_t     FilenameLen;
+    int32      CloseStatus;
+
+    RADIO_APP_Data.CmdCounter++;
+
+    /* Validate filename is not empty */
+    FilenameLen = strlen(Msg->Filename);
+    if (FilenameLen == 0)
+    {
+        CFE_EVS_SendEvent(RADIO_APP_FILE_OPEN_ERR_EID, CFE_EVS_EventType_ERROR,
+                          "RADIO: Filename is empty");
+        RADIO_APP_Data.ErrCounter++;
+        return CFE_SB_BAD_ARGUMENT;
+    }
+
+    /* Validate filename length */
+    if (FilenameLen >= OS_MAX_PATH_LEN)
+    {
+        CFE_EVS_SendEvent(RADIO_APP_FILE_OPEN_ERR_EID, CFE_EVS_EventType_ERROR,
+                          "RADIO: Filename too long: %lu bytes (max %lu)", (unsigned long)FilenameLen,
+                          (unsigned long)(OS_MAX_PATH_LEN - 1));
+        RADIO_APP_Data.ErrCounter++;
+        return CFE_SB_BAD_ARGUMENT;
+    }
+
+    /* Open file - OS_FILE_FLAG_NONE ensures file is NOT created if it doesn't exist */
+    OsStatus = OS_OpenCreate(&FileHandle, Msg->Filename, OS_FILE_FLAG_NONE, OS_READ_ONLY);
+
+    /* Check if file open failed (file doesn't exist or other error) */
+    if (OsStatus != OS_SUCCESS)
+    {
+        CFE_EVS_SendEvent(RADIO_APP_FILE_OPEN_ERR_EID, CFE_EVS_EventType_ERROR,
+                          "RADIO: Failed to open file '%s', RC = 0x%08lX", Msg->Filename, (unsigned long)OsStatus);
+        RADIO_APP_Data.ErrCounter++;
+        return CFE_STATUS_EXTERNAL_RESOURCE_FAIL;
+    }
+
+    /* Read and send chunks */
+    while ((BytesRead = OS_read(FileHandle, ChunkBuffer, BUS_COMMS_MAX_SEND_LEN)) > 0)
+    {
+        /* Send chunk to bus_comms */
+        status = RADIO_APP_SendFileChunkToBusComms(ChunkBuffer, (uint16)BytesRead, Msg->DestAddress, Msg->DestPort);
+        if (status != CFE_SUCCESS)
+        {
+            /* Close file on transmission error */
+            CloseStatus = OS_close(FileHandle);
+            if (CloseStatus != OS_SUCCESS)
+            {
+                CFE_ES_WriteToSysLog("RADIO: Error closing file after transmission error, RC = 0x%08lX\n",
+                                     (unsigned long)CloseStatus);
+            }
+            RADIO_APP_Data.ErrCounter++;
+            return status;
+        }
+
+        TotalBytesSent += BytesRead;
+        ChunkCount++;
+    }
+
+    /* Check for read errors (negative return values indicate errors) */
+    if (BytesRead < 0)
+    {
+        CFE_EVS_SendEvent(RADIO_APP_FILE_READ_ERR_EID, CFE_EVS_EventType_ERROR,
+                          "RADIO: Error reading file '%s', RC = 0x%08lX", Msg->Filename, (unsigned long)BytesRead);
+        CloseStatus = OS_close(FileHandle);
+        if (CloseStatus != OS_SUCCESS)
+        {
+            CFE_ES_WriteToSysLog("RADIO: Error closing file after read error, RC = 0x%08lX\n",
+                                 (unsigned long)CloseStatus);
+        }
+        RADIO_APP_Data.ErrCounter++;
+        return CFE_STATUS_EXTERNAL_RESOURCE_FAIL;
+    }
+
+    /* Close file */
+    CloseStatus = OS_close(FileHandle);
+    if (CloseStatus != OS_SUCCESS)
+    {
+        CFE_ES_WriteToSysLog("RADIO: Error closing file, RC = 0x%08lX\n", (unsigned long)CloseStatus);
+        /* Log but don't fail the operation */
+    }
+
+    /* Send success event */
+    CFE_EVS_SendEvent(RADIO_APP_FILE_TX_INF_EID, CFE_EVS_EventType_INFORMATION,
+                      "RADIO: File transmission completed - File='%s', Bytes=%lu, Chunks=%u", Msg->Filename,
+                      (unsigned long)TotalBytesSent, ChunkCount);
+
+    return CFE_SUCCESS;
+}
+
 int32 RADIO_APP_SendConfigToBusComms(const RADIO_APP_ConfigureCmd_t *ConfigCmd)
 {
     BUS_COMMS_SendCspCmd_t BusCommsCmd;
@@ -347,6 +475,35 @@ int32 RADIO_APP_SendTxToBusComms(const RADIO_APP_TransmitCmd_t *TxCmd)
     return status;
 }
 
+int32 RADIO_APP_SendFileChunkToBusComms(const uint8 *ChunkData, uint16 ChunkSize, uint8 DestAddr, uint8 DestPort)
+{
+    BUS_COMMS_SendCspCmd_t BusCommsCmd;
+    int32                  status;
+
+    if (ChunkSize > BUS_COMMS_MAX_SEND_LEN)
+    {
+        return CFE_STATUS_EXTERNAL_RESOURCE_FAIL;
+    }
+
+    memset(&BusCommsCmd, 0, sizeof(BusCommsCmd));
+
+    memcpy(BusCommsCmd.data, ChunkData, ChunkSize);
+    BusCommsCmd.dest = DestAddr;
+    BusCommsCmd.port = DestPort;
+    BusCommsCmd.len  = ChunkSize;
+
+    CFE_MSG_Init(CFE_MSG_PTR(BusCommsCmd.CmdHdr), CFE_SB_ValueToMsgId(BUS_COMMS_CMD_MID), sizeof(BusCommsCmd));
+    CFE_MSG_SetFcnCode(CFE_MSG_PTR(BusCommsCmd.CmdHdr), BUS_COMMS_SEND_CSP_CC);
+
+    status = CFE_SB_TransmitMsg(CFE_MSG_PTR(BusCommsCmd.CmdHdr), true);
+    if (status != CFE_SUCCESS)
+    {
+        CFE_EVS_SendEvent(RADIO_APP_FILE_TX_ERR_EID, CFE_EVS_EventType_ERROR,
+                          "RADIO: Failed to send file chunk to bus_comms, RC = 0x%08lX", (unsigned long)status);
+    }
+    return status;
+}
+
 bool RADIO_APP_VerifyCmdLength(CFE_MSG_Message_t *MsgPtr, size_t ExpectedLength)
 {
     bool              result       = true;
@@ -372,5 +529,82 @@ bool RADIO_APP_VerifyCmdLength(CFE_MSG_Message_t *MsgPtr, size_t ExpectedLength)
     }
 
     return result;
+}
+
+int32 RADIO_APP_TblValidationFunc(void *TblData)
+{
+    int32              ReturnCode = CFE_SUCCESS;
+    RADIO_APP_Table_t *TblDataPtr = (RADIO_APP_Table_t *)TblData;
+
+    /* Validate power levels (0-100%) */
+    if (TblDataPtr->PowerData > 100 || TblDataPtr->PowerMorse > 100)
+    {
+        ReturnCode = RADIO_APP_TABLE_OUT_OF_RANGE_ERR_CODE;
+    }
+
+    /* Validate RF frequency (1 MHz to 10 GHz) */
+    if (TblDataPtr->RfFrequency < 1000000 || TblDataPtr->RfFrequency > 10000000000)
+    {
+        ReturnCode = RADIO_APP_TABLE_OUT_OF_RANGE_ERR_CODE;
+    }
+
+    /* Validate Morse speed (5-50 WPM) */
+    if (TblDataPtr->MorseSpeed < 5 || TblDataPtr->MorseSpeed > 50)
+    {
+        ReturnCode = RADIO_APP_TABLE_OUT_OF_RANGE_ERR_CODE;
+    }
+
+    /* Validate Max PA temp (0-150 C) */
+    if (TblDataPtr->MaxPaTemp > 150)
+    {
+        ReturnCode = RADIO_APP_TABLE_OUT_OF_RANGE_ERR_CODE;
+    }
+
+    /* Validate PA voltage (0-5000 mV) */
+    if (TblDataPtr->PaVoltage > 5000)
+    {
+        ReturnCode = RADIO_APP_TABLE_OUT_OF_RANGE_ERR_CODE;
+    }
+
+    /* Validate baudrates (reasonable ranges) */
+    if (TblDataPtr->I2cBaudrate > 3400000 || TblDataPtr->Rs485Baudrate > 115200 ||
+        TblDataPtr->UartBaudrate > 115200 || TblDataPtr->TrxBaudrate > 115200)
+    {
+        ReturnCode = RADIO_APP_TABLE_OUT_OF_RANGE_ERR_CODE;
+    }
+
+    /* Validate beacon period (1-3600 seconds) */
+    if (TblDataPtr->BeaconPeriod < 1 || TblDataPtr->BeaconPeriod > 3600)
+    {
+        ReturnCode = RADIO_APP_TABLE_OUT_OF_RANGE_ERR_CODE;
+    }
+
+    /* Validate CSP address (1-255) */
+    if (TblDataPtr->CspAddress == 0 || TblDataPtr->CspAddress > 255)
+    {
+        ReturnCode = RADIO_APP_TABLE_OUT_OF_RANGE_ERR_CODE;
+    }
+
+    return ReturnCode;
+}
+
+void RADIO_APP_ProcessTableUpdate(void)
+{
+    int32              status;
+    RADIO_APP_Table_t *TblPtr;
+
+    status = CFE_TBL_GetAddress((void *)&TblPtr, RADIO_APP_Data.TblHandles[0]);
+
+    if (status == CFE_TBL_INFO_UPDATED)
+    {
+        /* TODO: Add your logic here to handle table updates */
+        /* Example: reconfigure radio with new parameters */
+        /* TblPtr->RfFrequency, TblPtr->PowerData, TblPtr->PowerMorse, etc. */
+    }
+
+    if (status >= CFE_SUCCESS)
+    {
+        CFE_TBL_ReleaseAddress(RADIO_APP_Data.TblHandles[0]);
+    }
 }
 

@@ -38,6 +38,10 @@
 #define RADIO_APP_CONFIG_ERR_EID        10
 #define RADIO_APP_TX_ERR_EID            11
 #define RADIO_APP_BUS_COMMS_SEND_INF_EID 12
+#define RADIO_APP_FILE_TX_INF_EID       13
+#define RADIO_APP_FILE_OPEN_ERR_EID     14
+#define RADIO_APP_FILE_READ_ERR_EID     15
+#define RADIO_APP_FILE_TX_ERR_EID       16
 
 #endif /* RADIO_APP_EVENTS_H */
 

@@ -32,6 +32,7 @@
 #define RADIO_APP_TRANSMIT_CC       2
 #define RADIO_APP_CONFIGURE_CC      3
 #define RADIO_APP_HK_REQUEST_CC     4
+#define RADIO_APP_TRANSMIT_FILE_CC 5
 
 typedef struct
 {
@@ -53,6 +54,14 @@ typedef struct
     uint16 CommandLength;
     char   Command[256];
 } RADIO_APP_ConfigureCmd_t;
+
+typedef struct
+{
+    CFE_MSG_CommandHeader_t CmdHeader;
+    uint8  DestAddress;
+    uint8  DestPort;
+    char   Filename[OS_MAX_PATH_LEN];
+} RADIO_APP_TransmitFileCmd_t;
 
 typedef RADIO_APP_NoArgsCmd_t RADIO_APP_NoopCmd_t;
 typedef RADIO_APP_NoArgsCmd_t RADIO_APP_ResetCountersCmd_t;

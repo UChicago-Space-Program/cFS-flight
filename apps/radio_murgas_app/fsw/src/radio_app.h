@@ -37,6 +37,12 @@
 
 #define RADIO_APP_PIPE_DEPTH 32
 
+#define RADIO_APP_NUMBER_OF_TABLES 1
+
+#define RADIO_APP_TABLE_FILE "/cf/radio_app_tbl.tbl"
+
+#define RADIO_APP_TABLE_OUT_OF_RANGE_ERR_CODE -1
+
 typedef struct
 {
     uint8 CmdCounter;
@@ -50,6 +56,8 @@ typedef struct
 
     char   PipeName[CFE_MISSION_MAX_API_LEN];
     uint16 PipeDepth;
+
+    CFE_TBL_Handle_t TblHandles[RADIO_APP_NUMBER_OF_TABLES];
 } RADIO_APP_Data_t;
 
 void  RADIO_APP_Main(void);
@@ -64,7 +72,11 @@ int32 RADIO_APP_ConfigureRadio(const RADIO_APP_ConfigureCmd_t *Msg);
 int32 RADIO_APP_RequestHousekeeping(const RADIO_APP_HkRequestCmd_t *Msg);
 int32 RADIO_APP_SendConfigToBusComms(const RADIO_APP_ConfigureCmd_t *ConfigCmd);
 int32 RADIO_APP_SendTxToBusComms(const RADIO_APP_TransmitCmd_t *TxCmd);
+int32 RADIO_APP_TransmitFile(const RADIO_APP_TransmitFileCmd_t *Msg);
+int32 RADIO_APP_SendFileChunkToBusComms(const uint8 *ChunkData, uint16 ChunkSize, uint8 DestAddr, uint8 DestPort);
 bool  RADIO_APP_VerifyCmdLength(CFE_MSG_Message_t *MsgPtr, size_t ExpectedLength);
+int32 RADIO_APP_TblValidationFunc(void *TblData);
+void  RADIO_APP_ProcessTableUpdate(void);
 
 #endif /* RADIO_APP_H */
 
